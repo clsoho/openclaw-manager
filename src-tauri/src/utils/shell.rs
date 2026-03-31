@@ -271,11 +271,25 @@ pub fn get_openclaw_path() -> Option<String> {
         }
     }
     
-    // 回退：检查是否在 PATH 中
-    if command_exists("openclaw") {
-        return Some("openclaw".to_string());
+    // 回退：通过 cmd.exe / where 命令查找（比 command_exists 更可靠，因为能拿到实际路径）
+    if platform::is_windows() {
+        if let Ok(where_output) = run_cmd_output("where openclaw") {
+            let first_line = where_output.lines().find(|l| !l.trim().is_empty());
+            if let Some(path) = first_line {
+                let path = path.trim();
+                if std::path::Path::new(path).exists() {
+                    info!("[Shell] 通过 where 找到 openclaw: {}", path);
+                    return Some(path.to_string());
+                }
+            }
+        }
+    } else {
+        // Unix 回退
+        if command_exists("openclaw") {
+            return Some("openclaw".to_string());
+        }
     }
-    
+
     // 最后尝试：通过用户 shell 查找
     if !platform::is_windows() {
         if let Ok(path) = run_bash_output("source ~/.zshrc 2>/dev/null || source ~/.bashrc 2>/dev/null; which openclaw 2>/dev/null") {
@@ -364,19 +378,50 @@ fn get_unix_openclaw_paths() -> Vec<String> {
 /// 获取 Windows 上可能的 openclaw 安装路径
 fn get_windows_openclaw_paths() -> Vec<String> {
     let mut paths = Vec::new();
-    
+
+    // 0. 动态查询 npm 全局安装路径（最可靠的方式）
+    //    先尝试 run_cmd (cmd.exe)，再尝试直接用 npm
+    if let Ok(npm_prefix) = run_cmd_output("npm prefix -g") {
+        let npm_prefix = npm_prefix.trim();
+        if !npm_prefix.is_empty() {
+            info!("[Shell] npm 全局路径: {}", npm_prefix);
+            // openclaw.cmd (npm 在 Windows 上生成的入口)
+            paths.push(format!("{}\\openclaw.cmd", npm_prefix));
+            // openclaw (无扩展名，某些配置下可能存在)
+            paths.push(format!("{}\\openclaw", npm_prefix));
+            // openclaw.ps1 (PowerShell 入口)
+            paths.push(format!("{}\\openclaw.ps1", npm_prefix));
+        }
+    }
+
     // 1. nvm4w 安装路径
     paths.push("C:\\nvm4w\\nodejs\\openclaw.cmd".to_string());
-    
-    // 2. 用户目录下的 npm 全局路径
+
+    // 2. 用户目录下的 npm 全局路径（默认 AppData\Roaming\npm）
     if let Some(home) = dirs::home_dir() {
-        let npm_path = format!("{}\\AppData\\Roaming\\npm\\openclaw.cmd", home.display());
-        paths.push(npm_path);
+        let home_str = home.display().to_string();
+        paths.push(format!("{}\\AppData\\Roaming\\npm\\openclaw.cmd", home_str));
+        // 也检查 node_modules 下的 .bin
+        paths.push(format!("{}\\AppData\\Roaming\\npm\\node_modules\\openclaw\\bin\\openclaw", home_str));
     }
-    
+
     // 3. Program Files 下的 nodejs
     paths.push("C:\\Program Files\\nodejs\\openclaw.cmd".to_string());
-    
+
+    // 4. 常见的自定义 Node.js 安装目录
+    paths.push("D:\\NodeJS\\node_global\\openclaw.cmd".to_string());
+    paths.push("C:\\NodeJS\\node_global\\openclaw.cmd".to_string());
+    paths.push("D:\\nodejs\\node_global\\openclaw.cmd".to_string());
+
+    // 5. Scoop 安装路径
+    if let Some(home) = dirs::home_dir() {
+        let home_str = home.display().to_string();
+        paths.push(format!("{}\\scoop\\apps\\nodejs\\current\\openclaw.cmd", home_str));
+    }
+
+    // 6. Chocolatey 安装路径
+    paths.push("C:\\ProgramData\\chocolatey\\bin\\openclaw.cmd".to_string());
+
     paths
 }
 
