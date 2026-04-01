@@ -45,6 +45,24 @@ interface OfficialProvider {
   suggested_models: SuggestedModel[];
   requires_api_key: boolean;
   docs_url: string | null;
+  auth_type: string; // "api_key" | "device_flow"
+}
+
+interface DeviceFlowResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+interface CopilotAuthResult {
+  success: boolean;
+  access_token: string | null;
+  user_code: string | null;
+  verification_uri: string | null;
+  expires_in: number | null;
+  error: string | null;
 }
 
 interface ConfiguredModel {
@@ -137,6 +155,13 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
   const [formError, setFormError] = useState<string | null>(null);
   const [showCustomUrlWarning, setShowCustomUrlWarning] = useState(false);
 
+  // GitHub Copilot 设备流状态
+  const isDeviceFlow = selectedOfficial?.auth_type === 'device_flow';
+  const [copilotStep, setCopilotStep] = useState<'idle' | 'waiting' | 'polling' | 'success' | 'error'>('idle');
+  const [copilotUserCode, setCopilotUserCode] = useState('');
+  const [copilotVerifyUrl, setCopilotVerifyUrl] = useState('');
+  const [copilotError, setCopilotError] = useState('');
+
   // 检查是否是官方 Provider 名字但使用了自定义地址
   const isCustomUrlWithOfficialName = (() => {
     const official = officialProviders.find(p => p.id === providerName);
@@ -198,6 +223,45 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
   const handleApplySuggestedName = () => {
     if (suggestedName) {
       setProviderName(suggestedName);
+    }
+  };
+
+  // GitHub Copilot 设备流认证
+  const handleCopilotLogin = async () => {
+    setCopilotStep('polling');
+    setCopilotError('');
+    setFormError(null);
+    try {
+      // Step 1: 获取设备码
+      const deviceFlow = await invoke<DeviceFlowResponse>('github_copilot_start_auth');
+      setCopilotUserCode(deviceFlow.user_code);
+      setCopilotVerifyUrl(deviceFlow.verification_uri);
+      setCopilotStep('waiting');
+
+      // Step 2: 轮询等待用户授权
+      const poll = async () => {
+        try {
+          const result = await invoke<CopilotAuthResult>('github_copilot_poll_token', {
+            deviceCode: deviceFlow.device_code,
+            interval: deviceFlow.interval,
+          });
+          if (result.success && result.access_token) {
+            setCopilotStep('success');
+            // 自动填入 token
+            setApiKey(result.access_token);
+          } else {
+            setCopilotError(result.error || '认证失败');
+            setCopilotStep('error');
+          }
+        } catch (e) {
+          setCopilotError(String(e));
+          setCopilotStep('error');
+        }
+      };
+      poll();
+    } catch (e) {
+      setCopilotError(String(e));
+      setCopilotStep('error');
     }
   };
 
@@ -385,46 +449,155 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
                   />
                 </div>
 
-              {/* API Key */}
+              {/* API Key / Device Flow */}
                 <div>
-                  <label className="block text-sm text-content-secondary mb-2">
-                    API Key
-                    {!selectedOfficial?.requires_api_key && (
-                      <span className="text-gray-600 text-xs ml-2">{t('aiConfig.optional')}</span>
-                    )}
-                  </label>
-                  {/* 编辑模式下显示当前 API Key 状态 */}
-                  {isEditing && editingProvider?.has_api_key && (
-                    <div className="mb-2 flex items-center gap-2 text-sm">
-                      <span className="text-content-tertiary">当前:</span>
-                      <code className="px-2 py-0.5 bg-surface-elevated rounded text-content-secondary">
-                        {editingProvider.api_key_masked}
-                      </code>
-                      <span className="text-green-400 text-xs">{'✓ ' + t('aiConfig.configured')}</span>
+                  {isDeviceFlow ? (
+                    /* GitHub Copilot 设备流认证 */
+                    <div className="space-y-3">
+                      <label className="block text-sm text-content-secondary mb-2">
+                        GitHub Copilot 认证
+                      </label>
+
+                      {isEditing && editingProvider?.has_api_key && (
+                        <div className="mb-2 flex items-center gap-2 text-sm">
+                          <span className="text-content-tertiary">当前:</span>
+                          <code className="px-2 py-0.5 bg-surface-elevated rounded text-content-secondary">
+                            {editingProvider.api_key_masked}
+                          </code>
+                          <span className="text-green-400 text-xs">{'✓ ' + t('aiConfig.configured')}</span>
+                        </div>
+                      )}
+
+                      {copilotStep === 'idle' && (
+                        <button
+                          onClick={handleCopilotLogin}
+                          className="btn-primary w-full flex items-center justify-center gap-2 py-3"
+                        >
+                          <ExternalLink size={16} />
+                          {isEditing ? '重新登录 GitHub Copilot' : '登录 GitHub Copilot'}
+                        </button>
+                      )}
+
+                      {copilotStep === 'waiting' && (
+                        <div className="p-4 bg-surface-elevated rounded-xl border border-edge space-y-3">
+                          <p className="text-sm text-content-secondary">
+                            请在浏览器中完成授权：
+                          </p>
+                          <a
+                            href={copilotVerifyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-primary w-full flex items-center justify-center gap-2 py-3"
+                          >
+                            <ExternalLink size={16} />
+                            打开 GitHub 授权页面
+                          </a>
+                          <div className="text-center">
+                            <p className="text-xs text-content-tertiary mb-1">授权码：</p>
+                            <p className="text-2xl font-mono font-bold text-claw-400 tracking-widest">
+                              {copilotUserCode}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-center gap-2 text-sm text-content-tertiary">
+                            <Loader2 size={14} className="animate-spin" />
+                            等待授权中...
+                          </div>
+                        </div>
+                      )}
+
+                      {copilotStep === 'polling' && (
+                        <div className="flex items-center justify-center gap-2 p-4 text-sm text-content-tertiary">
+                          <Loader2 size={16} className="animate-spin" />
+                          正在启动认证...
+                        </div>
+                      )}
+
+                      {copilotStep === 'success' && (
+                        <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-xl flex items-center gap-3">
+                          <CheckCircle size={20} className="text-green-400" />
+                          <div>
+                            <p className="text-green-400 font-medium">认证成功！</p>
+                            <p className="text-xs text-green-300 mt-0.5">Token 已自动填入</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {copilotStep === 'error' && (
+                        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl space-y-2">
+                          <div className="flex items-center gap-2">
+                            <XCircle size={16} className="text-red-400" />
+                            <p className="text-red-400 text-sm">{copilotError}</p>
+                          </div>
+                          <button
+                            onClick={() => { setCopilotStep('idle'); setCopilotError(''); }}
+                            className="text-sm text-red-300 hover:text-red-200 underline"
+                          >
+                            重试
+                          </button>
+                        </div>
+                      )}
+
+                      {copilotStep === 'success' && (
+                        <div className="relative mt-2">
+                          <input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={apiKey}
+                            onChange={e => setApiKey(e.target.value)}
+                            placeholder="Token 已自动填入，也可手动修改"
+                            className="input-base pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-primary"
+                          >
+                            {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  <div className="relative">
-                    <input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={apiKey}
-                      onChange={e => setApiKey(e.target.value)}
-                      placeholder={isEditing && editingProvider?.has_api_key
-                        ? t('aiConfig.keepApiKey')
-                        : "sk-..."}
-                      className="input-base pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-primary"
-                    >
-                      {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
-                  {isEditing && editingProvider?.has_api_key && (
-                    <p className="text-xs text-content-tertiary mt-1">
-                      💡 如果不需要更改 API Key，请保持为空
-                    </p>
+                  ) : (
+                    /* 普通 API Key 输入 */
+                    <>
+                      <label className="block text-sm text-content-secondary mb-2">
+                        API Key
+                        {!selectedOfficial?.requires_api_key && (
+                          <span className="text-gray-600 text-xs ml-2">{t('aiConfig.optional')}</span>
+                        )}
+                      </label>
+                      {isEditing && editingProvider?.has_api_key && (
+                        <div className="mb-2 flex items-center gap-2 text-sm">
+                          <span className="text-content-tertiary">当前:</span>
+                          <code className="px-2 py-0.5 bg-surface-elevated rounded text-content-secondary">
+                            {editingProvider.api_key_masked}
+                          </code>
+                          <span className="text-green-400 text-xs">{'✓ ' + t('aiConfig.configured')}</span>
+                        </div>
+                      )}
+                      <div className="relative">
+                        <input
+                          type={showApiKey ? 'text' : 'password'}
+                          value={apiKey}
+                          onChange={e => setApiKey(e.target.value)}
+                          placeholder={isEditing && editingProvider?.has_api_key
+                            ? t('aiConfig.keepApiKey')
+                            : "sk-..."}
+                          className="input-base pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-primary"
+                        >
+                          {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                      {isEditing && editingProvider?.has_api_key && (
+                        <p className="text-xs text-content-tertiary mt-1">
+                          💡 如果不需要更改 API Key，请保持为空
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
 

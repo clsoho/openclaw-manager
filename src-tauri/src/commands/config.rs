@@ -192,6 +192,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "anthropic-messages".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/anthropic".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "claude-opus-4-5-20251101".to_string(),
@@ -219,6 +220,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/openai".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "gpt-4o".to_string(),
@@ -246,6 +248,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/moonshot".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "kimi-k2.5".to_string(),
@@ -273,6 +276,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/qwen".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "qwen-max".to_string(),
@@ -300,6 +304,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: None,
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "deepseek-chat".to_string(),
@@ -327,6 +332,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/glm".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "glm-4".to_string(),
@@ -346,6 +352,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "anthropic-messages".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/minimax".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "minimax-m2.1".to_string(),
@@ -365,6 +372,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/venice".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "llama-3.3-70b".to_string(),
@@ -384,6 +392,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/openrouter".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "anthropic/claude-opus-4-5".to_string(),
@@ -403,6 +412,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             api_type: "openai-completions".to_string(),
             requires_api_key: false,
             docs_url: Some("https://docs.openclaw.ai/providers/ollama".to_string()),
+            auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
                     id: "llama3".to_string(),
@@ -414,6 +424,50 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
                 },
             ],
         },
+        OfficialProvider {
+            id: "github-copilot".to_string(),
+            name: "GitHub Copilot".to_string(),
+            icon: "🐙".to_string(),
+            default_base_url: Some("https://api.githubcopilot.com".to_string()),
+            api_type: "openai-completions".to_string(),
+            requires_api_key: true,
+            docs_url: Some("https://docs.github.com/en/copilot".to_string()),
+            auth_type: "device_flow".to_string(),
+            suggested_models: vec![
+                SuggestedModel {
+                    id: "gpt-4o".to_string(),
+                    name: "GPT-4o (Copilot)".to_string(),
+                    description: Some("OpenAI GPT-4o via Copilot".to_string()),
+                    context_window: Some(128000),
+                    max_tokens: Some(16384),
+                    recommended: true,
+                },
+                SuggestedModel {
+                    id: "claude-sonnet-4-20250514".to_string(),
+                    name: "Claude Sonnet 4 (Copilot)".to_string(),
+                    description: Some("Anthropic Claude via Copilot".to_string()),
+                    context_window: Some(200000),
+                    max_tokens: Some(16384),
+                    recommended: true,
+                },
+                SuggestedModel {
+                    id: "o3-mini".to_string(),
+                    name: "o3-mini (Copilot)".to_string(),
+                    description: Some("OpenAI 推理模型".to_string()),
+                    context_window: Some(200000),
+                    max_tokens: Some(100000),
+                    recommended: false,
+                },
+                SuggestedModel {
+                    id: "gpt-4.1".to_string(),
+                    name: "GPT-4.1 (Copilot)".to_string(),
+                    description: Some("OpenAI 最新模型".to_string()),
+                    context_window: Some(1047576),
+                    max_tokens: Some(32768),
+                    recommended: false,
+                },
+            ],
+        },
     ];
 
     info!(
@@ -421,6 +475,191 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
         providers.len()
     );
     Ok(providers)
+}
+
+// ============ GitHub Copilot 设备流认证 ============
+
+/// GitHub Copilot OAuth 设备流 - 请求设备码
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeviceFlowResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u32,
+    pub interval: u32,
+}
+
+/// GitHub Copilot OAuth 设备流 - Token 响应
+#[derive(Debug, Deserialize)]
+struct TokenResponse {
+    access_token: Option<String>,
+    token_type: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+/// GitHub Copilot 认证结果
+#[derive(Debug, Serialize)]
+pub struct CopilotAuthResult {
+    pub success: bool,
+    pub access_token: Option<String>,
+    pub user_code: Option<String>,
+    pub verification_uri: Option<String>,
+    pub expires_in: Option<u32>,
+    pub error: Option<String>,
+}
+
+/// GitHub Copilot VS Code 客户端 ID（公开的，所有人都用这个）
+const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
+
+/// 启动 GitHub Copilot 设备流认证
+#[command]
+pub async fn github_copilot_start_auth() -> Result<DeviceFlowResponse, String> {
+    info!("[GitHub Copilot] 启动设备流认证...");
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("https://github.com/login/device/code")
+        .form(&[
+            ("client_id", COPILOT_CLIENT_ID),
+            ("scope", "read:user"),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("请求设备码失败: {}", e))?;
+
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("GitHub 返回错误 ({}): {}", status, body));
+    }
+
+    // GitHub 返回的是 form-urlencoded 格式
+    let body = res.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let params: HashMap<String, String> = serde_urlencoded::from_str(&body)
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    let device_code = params.get("device_code")
+        .ok_or_else(|| "响应中缺少 device_code".to_string())?
+        .clone();
+    let user_code = params.get("user_code")
+        .ok_or_else(|| "响应中缺少 user_code".to_string())?
+        .clone();
+    let verification_uri = params.get("verification_uri")
+        .ok_or_else(|| "响应中缺少 verification_uri".to_string())?
+        .clone();
+    let expires_in = params.get("expires_in")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(900);
+    let interval = params.get("interval")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+
+    info!("[GitHub Copilot] ✓ 设备码已获取, 用户码: {}", user_code);
+
+    Ok(DeviceFlowResponse {
+        device_code,
+        user_code,
+        verification_uri,
+        expires_in,
+        interval,
+    })
+}
+
+/// 轮询 GitHub Copilot 认证状态
+#[command]
+pub async fn github_copilot_poll_token(device_code: String, interval: u32) -> Result<CopilotAuthResult, String> {
+    info!("[GitHub Copilot] 轮询 Token...");
+
+    let client = reqwest::Client::new();
+    let max_attempts = 60; // 最多轮询 5 分钟
+
+    for attempt in 1..=max_attempts {
+        tokio::time::sleep(tokio::time::Duration::from_secs(interval as u64)).await;
+
+        let res = client
+            .post("https://github.com/login/oauth/access_token")
+            .form(&[
+                ("client_id", COPILOT_CLIENT_ID),
+                ("device_code", device_code.as_str()),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ])
+            .send()
+            .await
+            .map_err(|e| format!("轮询失败: {}", e))?;
+
+        let body = res.text().await.unwrap_or_default();
+        let params: HashMap<String, String> = serde_urlencoded::from_str(&body)
+            .map_err(|e| format!("解析轮询响应失败: {}", e))?;
+
+        // 检查是否有错误
+        if let Some(err) = params.get("error") {
+            match err.as_str() {
+                "authorization_pending" => {
+                    if attempt % 10 == 0 {
+                        info!("[GitHub Copilot] 等待用户授权... (第{}次)", attempt);
+                    }
+                    continue; // 用户还没授权，继续轮询
+                }
+                "slow_down" => {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+                "expired_token" => {
+                    return Ok(CopilotAuthResult {
+                        success: false,
+                        access_token: None,
+                        user_code: None,
+                        verification_uri: None,
+                        expires_in: None,
+                        error: Some("设备码已过期，请重新发起认证".to_string()),
+                    });
+                }
+                "access_denied" => {
+                    return Ok(CopilotAuthResult {
+                        success: false,
+                        access_token: None,
+                        user_code: None,
+                        verification_uri: None,
+                        expires_in: None,
+                        error: Some("用户拒绝了授权".to_string()),
+                    });
+                }
+                other => {
+                    return Ok(CopilotAuthResult {
+                        success: false,
+                        access_token: None,
+                        user_code: None,
+                        verification_uri: None,
+                        expires_in: None,
+                        error: Some(format!("认证错误: {}", other)),
+                    });
+                }
+            }
+        }
+
+        // 获取到 Token
+        if let Some(access_token) = params.get("access_token") {
+            info!("[GitHub Copilot] ✓ 认证成功!");
+            return Ok(CopilotAuthResult {
+                success: true,
+                access_token: Some(access_token.clone()),
+                user_code: None,
+                verification_uri: None,
+                expires_in: None,
+                error: None,
+            });
+        }
+    }
+
+    Ok(CopilotAuthResult {
+        success: false,
+        access_token: None,
+        user_code: None,
+        verification_uri: None,
+        expires_in: None,
+        error: Some("认证超时，请重试".to_string()),
+    })
 }
 
 /// 获取 AI 配置概览

@@ -189,6 +189,13 @@ pub struct OfficialProvider {
     pub requires_api_key: bool,
     /// 文档链接
     pub docs_url: Option<String>,
+    /// 认证类型: "api_key" (默认) 或 "device_flow" (GitHub Copilot OAuth 设备流)
+    #[serde(default = "default_auth_type")]
+    pub auth_type: String,
+}
+
+fn default_auth_type() -> String {
+    "api_key".to_string()
 }
 
 /// 推荐模型

@@ -48,6 +48,8 @@ fn main() {
             config::get_dashboard_url,
             // AI 配置管理
             config::get_official_providers,
+            config::github_copilot_start_auth,
+            config::github_copilot_poll_token,
             config::get_ai_config,
             config::save_provider,
             config::delete_provider,
