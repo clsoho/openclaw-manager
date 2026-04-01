@@ -483,15 +483,20 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
                           <p className="text-sm text-content-secondary">
                             请在浏览器中完成授权：
                           </p>
-                          <a
-                            href={copilotVerifyUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            onClick={async () => {
+                              try {
+                                const { open } = await import('@tauri-apps/plugin-shell');
+                                await open(copilotVerifyUrl);
+                              } catch {
+                                window.open(copilotVerifyUrl, '_blank');
+                              }
+                            }}
                             className="btn-primary w-full flex items-center justify-center gap-2 py-3"
                           >
                             <ExternalLink size={16} />
                             打开 GitHub 授权页面
-                          </a>
+                          </button>
                           <div className="text-center">
                             <p className="text-xs text-content-tertiary mb-1">授权码：</p>
                             <p className="text-2xl font-mono font-bold text-claw-400 tracking-widest">
