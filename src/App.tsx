@@ -7,6 +7,7 @@ import { Header } from './components/Layout/Header';
 import { Dashboard } from './components/Dashboard';
 import { AIConfig } from './components/AIConfig';
 import { Channels } from './components/Channels';
+import { Chat } from './components/Chat';
 import { Skills } from './components/Skills';
 import { Agents } from './components/Agents';
 import { Settings } from './components/Settings';
@@ -18,7 +19,7 @@ import { isTauri } from './lib/tauri';
 import { ThemeProvider } from './lib/ThemeContext';
 import { Download, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 
-export type PageType = 'dashboard' | 'ai' | 'agents' | 'channels' | 'skills' | 'testing' | 'logs' | 'security' | 'settings';
+export type PageType = 'dashboard' | 'ai' | 'agents' | 'chat' | 'channels' | 'skills' | 'testing' | 'logs' | 'security' | 'settings';
 
 export interface EnvironmentStatus {
   node_installed: boolean;
@@ -56,6 +57,7 @@ function App() {
   const [isReady, setIsReady] = useState<boolean | null>(null);
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
+  const [chatAgentId, setChatAgentId] = useState<string | undefined>(undefined);
 
   // 更新相关状态
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -159,8 +161,11 @@ function App() {
     checkEnvironment();
   }, [checkEnvironment]);
 
-  const handleNavigate = (page: PageType) => {
+  const handleNavigate = (page: PageType, agentId?: string) => {
     appLogger.action('页面切换', { from: currentPage, to: page });
+    if (page === 'chat' && agentId) {
+      setChatAgentId(agentId);
+    }
     setCurrentPage(page);
   };
 
@@ -174,8 +179,9 @@ function App() {
     const pages: Record<PageType, JSX.Element> = {
       dashboard: <Dashboard envStatus={envStatus} onSetupComplete={handleSetupComplete} />,
       ai: <AIConfig />,
-      agents: <Agents />,
+      agents: <Agents onNavigate={handleNavigate} />,
       channels: <Channels />,
+      chat: <Chat initialAgentId={chatAgentId} />,
       skills: <Skills />,
       testing: <Testing />,
       logs: <Logs />,

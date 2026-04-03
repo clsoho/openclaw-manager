@@ -19,7 +19,9 @@ import {
     CheckCircle,
     XCircle,
     AlertTriangle,
+    MessageSquare,
 } from 'lucide-react';
+import { PageType } from '../../App';
 import clsx from 'clsx';
 
 // ============ 类型定义 ============
@@ -177,7 +179,11 @@ function NewAgentDialog({ existingIds, onClose, onCreated }: NewAgentDialogProps
 
 // ============ 主组件 ============
 
-export function Agents() {
+interface AgentsProps {
+    onNavigate: (page: PageType, agentId?: string) => void;
+}
+
+export function Agents({ onNavigate }: AgentsProps) {
     const [agents, setAgents] = useState<AgentConfig[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -544,6 +550,13 @@ export function Agents() {
                                     <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
                                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                                         {saving ? '保存中...' : '保存配置'}
+                                    </button>
+                                    <button
+                                        onClick={() => onNavigate('chat', form.id)}
+                                        className="btn-secondary flex items-center gap-2 text-claw-400 hover:text-claw-300 hover:border-claw-500/50"
+                                        title={`与 ${form.name} 开始聊天`}>
+                                        <MessageSquare size={16} />
+                                        聊天
                                     </button>
                                     {form.id !== 'main' && (
                                         <button onClick={handleDelete} disabled={deleting}

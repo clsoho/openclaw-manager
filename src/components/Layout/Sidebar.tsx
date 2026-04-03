@@ -9,6 +9,7 @@ import {
   ScrollText,
   Settings,
   ShieldAlert,
+  MessagesSquare,
 } from 'lucide-react';
 import { PageType } from '../../App';
 import clsx from 'clsx';
@@ -21,7 +22,7 @@ interface ServiceStatus {
 
 interface SidebarProps {
   currentPage: PageType;
-  onNavigate: (page: PageType) => void;
+  onNavigate: (page: PageType, agentId?: string) => void;
   serviceStatus: ServiceStatus | null;
 }
 
@@ -29,6 +30,7 @@ const menuItems: { id: PageType; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: '概览', icon: LayoutDashboard },
   { id: 'ai', label: 'AI 配置', icon: Bot },
   { id: 'agents', label: 'Agent 管理', icon: Users },
+  { id: 'chat', label: '聊天', icon: MessagesSquare },
   { id: 'channels', label: '消息渠道', icon: MessageSquare },
   { id: 'skills', label: '技能库', icon: Puzzle },
   { id: 'testing', label: '测试诊断', icon: FlaskConical },

@@ -92,6 +92,9 @@ fn main() {
             config::save_agent,
             config::delete_agent,
             config::set_default_agent,
+            // 聊天
+            config::get_chat_endpoint_status,
+            config::enable_chat_completions,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时发生错误");

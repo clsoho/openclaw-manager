@@ -205,4 +205,19 @@ export const api = {
   testAIConnection: () => invokeWithLog<AITestResult>('test_ai_connection'),
   testChannel: (channelType: string) =>
     invokeWithLog<unknown>('test_channel', { channelType }),
+
+  // 聊天
+  getChatEndpointStatus: () =>
+    invokeWithLog<ChatEndpointStatus>('get_chat_endpoint_status'),
+  enableChatCompletions: () =>
+    invokeWithLog<string>('enable_chat_completions'),
+  getOrCreateGatewayToken: () =>
+    invokeWithLog<string>('get_or_create_gateway_token'),
 };
+
+// 聊天端点状态
+export interface ChatEndpointStatus {
+  enabled: boolean;
+  gateway_running: boolean;
+  has_token: boolean;
+}

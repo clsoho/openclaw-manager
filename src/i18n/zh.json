@@ -10,6 +10,7 @@
   "sidebar": {
     "dashboard": "概览",
     "ai": "AI 配置",
+    "chat": "聊天",
     "channels": "消息渠道",
     "testing": "测试诊断",
     "logs": "应用日志",
@@ -21,6 +22,7 @@
   "header": {
     "dashboard": { "title": "概览", "description": "服务状态、日志与快捷操作" },
     "ai": { "title": "AI 模型配置", "description": "配置 AI 提供商和模型" },
+    "chat": { "title": "聊天", "description": "与 Agent 实时对话交互" },
     "channels": { "title": "消息渠道", "description": "配置 Telegram、Discord、飞书等" },
     "testing": { "title": "测试诊断", "description": "系统诊断与问题排查" },
     "logs": { "title": "应用日志", "description": "查看 Manager 应用的控制台日志" },

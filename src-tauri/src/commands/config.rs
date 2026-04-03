@@ -2339,6 +2339,72 @@ pub async fn delete_agent(agent_id: String) -> Result<String, String> {
     Ok(format!("Agent {} 已删除", agent_id))
 }
 
+/// Gateway chat completions 端点状态
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatEndpointStatus {
+    pub enabled: bool,
+    pub gateway_running: bool,
+    pub has_token: bool,
+}
+
+/// 检查 Gateway chat completions 端点状态
+#[command]
+pub async fn get_chat_endpoint_status() -> Result<ChatEndpointStatus, String> {
+    info!("[聊天端点] 检查 Gateway chat completions 端点状态...");
+
+    let config = load_openclaw_config()?;
+
+    let enabled = config
+        .pointer("/gateway/http/endpoints/chatCompletions/enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let has_token = config
+        .pointer("/gateway/auth/token")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+
+    let gateway_running = crate::utils::shell::run_openclaw(&["gateway", "status"])
+        .map(|output| output.to_lowercase().contains("running"))
+        .unwrap_or(false);
+
+    info!("[聊天端点] enabled={}, has_token={}, running={}", enabled, has_token, gateway_running);
+
+    Ok(ChatEndpointStatus {
+        enabled,
+        gateway_running,
+        has_token,
+    })
+}
+
+/// 启用 Gateway chat completions 端点
+#[command]
+pub async fn enable_chat_completions() -> Result<String, String> {
+    info!("[聊天端点] 启用 Gateway chat completions 端点...");
+
+    let mut config = load_openclaw_config()?;
+
+    if config.get("gateway").is_none() {
+        config["gateway"] = json!({});
+    }
+    if config["gateway"].get("http").is_none() {
+        config["gateway"]["http"] = json!({});
+    }
+    if config["gateway"]["http"].get("endpoints").is_none() {
+        config["gateway"]["http"]["endpoints"] = json!({});
+    }
+    if config["gateway"]["http"]["endpoints"].get("chatCompletions").is_none() {
+        config["gateway"]["http"]["endpoints"]["chatCompletions"] = json!({});
+    }
+
+    config["gateway"]["http"]["endpoints"]["chatCompletions"]["enabled"] = json!(true);
+
+    save_openclaw_config(&config)?;
+    info!("[聊天端点] ✓ chat completions 端点已启用");
+    Ok("chat completions 端点已启用，重启 Gateway 后生效".to_string())
+}
+
 /// 设置默认 Agent
 #[command]
 pub async fn set_default_agent(agent_id: String) -> Result<String, String> {

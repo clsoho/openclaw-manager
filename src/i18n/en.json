@@ -10,6 +10,7 @@
   "sidebar": {
     "dashboard": "Overview",
     "ai": "AI Config",
+    "chat": "Chat",
     "channels": "Channels",
     "testing": "Testing",
     "logs": "Logs",
@@ -21,6 +22,7 @@
   "header": {
     "dashboard": { "title": "Overview", "description": "Service status, logs, and quick actions" },
     "ai": { "title": "AI Model Config", "description": "Configure AI providers and models" },
+    "chat": { "title": "Chat", "description": "Real-time conversation with Agents" },
     "channels": { "title": "Message Channels", "description": "Configure Telegram, Discord, Feishu, etc." },
     "testing": { "title": "Testing & Diagnostics", "description": "System diagnostics and troubleshooting" },
     "logs": { "title": "App Logs", "description": "View Manager application console logs" },
