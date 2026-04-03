@@ -15,6 +15,7 @@ import {
   WifiOff,
   Settings,
   Zap,
+  Play,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -67,6 +68,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   const [showAgentDropdown, setShowAgentDropdown] = useState(false);
   const [endpointStatus, setEndpointStatus] = useState<EndpointStatus | null>(null);
   const [enablingEndpoint, setEnablingEndpoint] = useState(false);
+  const [startingGateway, setStartingGateway] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -130,13 +132,14 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
 
     const checkGateway = async () => {
       try {
-        const resp = await fetch('http://localhost:18789/health', {
+        // 使用 /v1/models 端点检测 Gateway 是否可用
+        const resp = await fetch('http://localhost:18789/v1/models', {
           headers: { Authorization: `Bearer ${gateway.token}` },
           signal: AbortSignal.timeout(3000),
         });
         setGateway(prev => ({
           ...prev,
-          running: resp.ok,
+          running: true,
           connected: resp.ok,
         }));
       } catch {
@@ -321,6 +324,23 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     setMessages([]);
   };
 
+  // 启动 Gateway 服务
+  const handleStartGateway = async () => {
+    setStartingGateway(true);
+    try {
+      await invoke<string>('start_service');
+      // 等待一会后重新检查连接
+      setTimeout(async () => {
+        const token = await invoke<string>('get_or_create_gateway_token').catch(() => null);
+        if (token) setGateway(prev => ({ ...prev, token }));
+        setStartingGateway(false);
+      }, 3000);
+    } catch (e) {
+      console.error('启动 Gateway 失败:', e);
+      setStartingGateway(false);
+    }
+  };
+
   // 一键启用 chat completions 端点
   const handleEnableEndpoint = async () => {
     setEnablingEndpoint(true);
@@ -493,16 +513,39 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
               </div>
             ) : (
               <>
-                <p className="text-sm text-content-tertiary max-w-sm mb-6">
-                  {gateway.connected
-                    ? '输入消息开始聊天，支持多轮对话。按 Enter 发送，Shift+Enter 换行。'
-                    : 'Gateway 服务未运行，请先在概览页面启动服务。'}
-                </p>
-                {!gateway.connected && (
+                {!gateway.connected && !gateway.running ? (
+                  <div className="max-w-sm space-y-4">
+                    <div className="flex items-start gap-3 px-4 py-3 bg-amber-500/10 rounded-xl text-left">
+                      <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm text-amber-400 font-medium">Gateway 服务未运行</p>
+                        <p className="text-xs text-content-tertiary mt-1">
+                          聊天功能依赖 Gateway 服务，请先启动服务。
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleStartGateway}
+                      disabled={startingGateway}
+                      className="btn-primary flex items-center gap-2 mx-auto"
+                    >
+                      {startingGateway ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <Play size={16} />
+                      )}
+                      {startingGateway ? '启动中...' : '启动 Gateway 服务'}
+                    </button>
+                  </div>
+                ) : !gateway.connected ? (
                   <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 rounded-xl text-amber-400 text-sm">
                     <AlertCircle size={16} />
-                    <span>Gateway 未连接 (localhost:18789)</span>
+                    <span>Gateway 已运行但 API 不可达，请检查配置</span>
                   </div>
+                ) : (
+                  <p className="text-sm text-content-tertiary max-w-sm mb-6">
+                    输入消息开始聊天，支持多轮对话。按 Enter 发送，Shift+Enter 换行。
+                  </p>
                 )}
               </>
             )}
