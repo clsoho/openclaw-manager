@@ -209,6 +209,18 @@ export const builtinChannelInfo: Record<string, ChannelInfoDefinition> = {
     helpText: '微信公众号/企业微信配置',
     docUrl: 'https://developers.weixin.qq.com/doc/',
   },
+  'weixin-official': {
+    name: '微信公众号',
+    icon: <MessageSquare size={20} />,
+    color: 'text-green-600',
+    fields: [
+      { key: 'appId', label: 'AppID', type: 'text', placeholder: '微信公众号 AppID', required: true },
+      { key: 'appSecret', label: 'AppSecret', type: 'password', placeholder: '微信公众号 AppSecret', required: true },
+      { key: 'token', label: 'Token', type: 'text', placeholder: '微信公众号 Token（验证用）' },
+    ],
+    helpText: '从微信公众平台获取 AppID 和 AppSecret',
+    docUrl: 'https://developers.weixin.qq.com/doc/',
+  },
   dingtalk: {
     name: '钉钉',
     icon: <Bell size={20} />,
@@ -363,6 +375,18 @@ export function Channels() {
         { key: 'appSecret', label: 'App Secret', type: 'password', placeholder: t('channels.wechat.appSecretPlaceholder') },
       ],
       helpText: t('channels.wechat.helpText'),
+      docUrl: 'https://developers.weixin.qq.com/doc/',
+    },
+    'weixin-official': {
+      name: '微信公众号',
+      icon: <MessageSquare size={20} />,
+      color: 'text-green-600',
+      fields: [
+        { key: 'appId', label: 'AppID', type: 'text', placeholder: '微信公众号 AppID', required: true },
+        { key: 'appSecret', label: 'AppSecret', type: 'password', placeholder: '微信公众号 AppSecret', required: true },
+        { key: 'token', label: 'Token', type: 'text', placeholder: '微信公众号 Token（验证用）' },
+      ],
+      helpText: '从微信公众平台获取 AppID 和 AppSecret',
       docUrl: 'https://developers.weixin.qq.com/doc/',
     },
     dingtalk: {

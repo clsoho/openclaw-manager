@@ -1,4 +1,4 @@
-use crate::models::{
+﻿use crate::models::{
     AIConfigOverview, ChannelConfig, ConfiguredModel, ConfiguredProvider,
     ModelConfig, ModelCostConfig, OfficialProvider, OpenClawConfig,
     ProviderConfig, SuggestedModel,
@@ -8,6 +8,7 @@ use log::{debug, error, info, warn};
 use serde_json::{json, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tauri::Emitter;
 use tauri::command;
 
 /// 获取 openclaw.json 配置
@@ -1090,7 +1091,8 @@ pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
         ("feishu", "feishu", vec!["testChatId"]),
         ("whatsapp", "whatsapp", vec![]),
         ("imessage", "imessage", vec![]),
-        ("wechat", "wechat", vec![]),
+        ("wechat", "wechat", vec!["testChatId"]),
+        ("weixin-official", "weixin_official", vec!["appId"]),
         ("dingtalk", "dingtalk", vec![]),
         ("qqbot", "qqbot", vec![]),
     ];
@@ -2205,10 +2207,17 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
 
     let config = load_openclaw_config()?;
 
-    // 读取 agents.list 数组
-    let agents_list = config.pointer("/agents/list")
-        .and_then(|v| v.as_array())
-        .cloned()
+    // 读取 agents.list — 兼容数组和单对象两种存储格式
+    let agents_list: Vec<Value> = config.pointer("/agents/list")
+        .and_then(|v| {
+            if let Some(arr) = v.as_array() {
+                Some(arr.clone())
+            } else if v.is_object() {
+                Some(vec![v.clone()])
+            } else {
+                None
+            }
+        })
         .unwrap_or_default();
 
     // 读取顶层 bindings 数组
@@ -2221,7 +2230,13 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
         .map(|entry| parse_agent_entry(entry, &all_bindings))
         .collect();
 
-    // 如果没有任何 Agent，生成一个默认的 main Agent
+    // 始终注入 main Agent（它是 Gateway 隐含的默认 Agent，不在配置中显式存在）
+    if !agents.iter().any(|a| a.id == "main") {
+        info!("[Agent 管理] ✓ 注入隐式 main Agent");
+        agents.insert(0, get_main_agent_config(&config, &all_bindings));
+    }
+
+    // 如果仍然没有任何 Agent，生成一个默认的
     if agents.is_empty() {
         let default_workspace = config.pointer("/agents/defaults/workspace")
             .and_then(|v| v.as_str())
@@ -2257,6 +2272,36 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
 
     info!("[Agent 管理] ✓ 返回 {} 个 Agent", agents.len());
     Ok(agents)
+}
+
+/// 构建隐含的 main Agent 配置（从 agents.defaults 中获取）
+fn get_main_agent_config(config: &Value, _all_bindings: &[Value]) -> AgentConfig {
+    let default_workspace = config.pointer("/agents/defaults/workspace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("~/.openclaw/workspace")
+        .to_string();
+
+    let model = config.pointer("/agents/defaults/model/primary")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    AgentConfig {
+        id: "main".into(),
+        name: "Main Agent".into(),
+        emoji: "🔧".into(),
+        theme: Some("OpenClaw 主助手 — 多任务智能代理".into()),
+        workspace: default_workspace,
+        agent_dir: None,
+        model,
+        is_default: true,
+        sandbox_mode: "off".into(),
+        tools_profile: None,
+        tools_allow: vec![],
+        tools_deny: vec![],
+        bindings: vec![],
+        mention_patterns: vec![],
+        subagent_allow: vec!["*".into()],
+    }
 }
 
 /// 保存 Agent（新增或更新）
@@ -2405,6 +2450,279 @@ pub async fn enable_chat_completions() -> Result<String, String> {
     Ok("chat completions 端点已启用，重启 Gateway 后生效".to_string())
 }
 
+/// 获取已配置的 LLM 模型列表（从 openclaw.json 的 agents.defaults.models 中提取）
+#[command]
+pub async fn fetch_gateway_models(_token: String) -> Result<Vec<String>, String> {
+    info!("[Gateway API] 获取已配置的 LLM 模型列表...");
+
+    let config = load_openclaw_config()?;
+
+    // 从 agents.defaults.models 中获取所有已注册的模型
+    let models: Vec<String> = config.pointer("/agents/defaults/models")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+
+    info!("[Gateway API] ✓ 获取到 {} 个 LLM 模型: {:?}", models.len(), models);
+    Ok(models)
+}
+
+/// 检查 Gateway 是否运行（通过 Rust 端代理请求）
+#[command]
+pub async fn check_gateway_running(token: String) -> Result<bool, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    match client
+        .get("http://127.0.0.1:18789/v1/models")
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+    {
+        Ok(resp) => Ok(resp.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// 获取聊天历史（通过 Gateway WebSocket 自定义协议）
+/// Gateway WS 协议：{type: "req", id, method, params} -> {type: "res", id, ok, payload, error}
+/// chat.history 参数：{sessionKey, limit}
+/// 返回：{messages: [...]}
+#[command]
+pub async fn fetch_chat_history(agent_id: String, token: String, limit: Option<u32>) -> Result<Vec<serde_json::Value>, String> {
+    use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as TsMessage};
+    use futures::StreamExt;
+    use futures::SinkExt;
+    use serde_json::json;
+    
+    let limit = limit.unwrap_or(50);
+    info!("[聊天历史] 获取历史: agent={}, limit={}", agent_id, limit);
+    
+    let ws_url = format!("ws://127.0.0.1:18789/ws?token={}", token);
+    let (ws_stream, _) = connect_async(&ws_url).await
+        .map_err(|e| format!("连接 Gateway WebSocket 失败: {}", e))?;
+    
+    let (mut ws_send, mut ws_recv) = ws_stream.split();
+    
+    // Gateway 自定义协议帧：{type: "req", id, method, params}
+    let req_id = format!("hist-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    
+    // sessionKey: main agent 直接用 "main"，其他 agent 用 agent ID
+    let session_key = if agent_id == "main" {
+        "main".to_string()
+    } else {
+        agent_id.clone()
+    };
+    
+    let req = json!({
+        "type": "req",
+        "id": &req_id,
+        "method": "chat.history",
+        "params": {
+            "sessionKey": session_key,
+            "limit": limit,
+        }
+    });
+    info!("[聊天历史] 发送请求: {}", req);
+    
+    ws_send.send(TsMessage::Text(req.to_string().into())).await
+        .map_err(|e| format!("发送请求失败: {}", e))?;
+    
+    // 读取响应（最多 10 秒）
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        async {
+            while let Some(msg_result) = ws_recv.next().await {
+                if let Ok(TsMessage::Text(text)) = msg_result {
+                    debug!("[聊天历史] 收到 WS 消息: {}", text.chars().take(500).collect::<String>());
+                    if let Ok(resp) = serde_json::from_str::<Value>(&text) {
+                        // 匹配响应协议: {type: "res", id, ok, payload}
+                        if resp.get("id").and_then(|v| v.as_str()) == Some(req_id.as_str()) {
+                            return Some(resp);
+                        }
+                    }
+                }
+            }
+            None
+        }
+    ).await;
+    
+    _ = ws_send.close().await;
+    
+    match result {
+        Ok(Some(resp)) => {
+            info!("[聊天历史] 收到响应: {}", resp);
+            // 检查 ok 字段
+            let ok = resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            if !ok {
+                if let Some(err) = resp.get("error") {
+                    warn!("[聊天历史] Gateway 返回错误: {:?}", err);
+                }
+                return Ok(vec![]);
+            }
+            // payload 中包含 messages
+            if let Some(payload) = resp.get("payload") {
+                if let Value::Object(obj) = payload {
+                    if let Some(messages) = obj.get("messages").and_then(|v| v.as_array()) {
+                        info!("[聊天历史] 获取到 {} 条消息", messages.len());
+                        Ok(messages.clone())
+                    } else if let Some(messages) = obj.get("transcript").and_then(|v| v.as_array()) {
+                        info!("[聊天历史] 从 transcript 获取到 {} 条消息", messages.len());
+                        Ok(messages.clone())
+                    } else {
+                        info!("[聊天历史] payload 中无 messages 字段: {:?}", payload);
+                        Ok(vec![])
+                    }
+                } else if let Value::Array(arr) = payload {
+                    info!("[聊天历史] payload 是数组，{} 条", arr.len());
+                    Ok(arr.clone())
+                } else {
+                    info!("[聊天历史] payload 格式未知: {:?}", payload);
+                    Ok(vec![])
+                }
+            } else {
+                info!("[聊天历史] 无 payload 字段");
+                Ok(vec![])
+            }
+        }
+        Ok(None) => {
+            info!("[聊天历史] 未收到匹配 id 的响应");
+            Ok(vec![])
+        }
+        Err(_) => {
+            warn!("[聊天历史] 等待响应超时");
+            Ok(vec![])
+        }
+    }
+}
+
+/// Chat 流式请求 —— Rust 代理（通过 Tauri 事件流式转发到前端）
+#[command]
+pub async fn send_chat_stream(
+    app: tauri::AppHandle,
+    token: String,
+    agent_id: String,
+    model: String,
+    messages: Vec<serde_json::Value>,
+    request_id: String,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+
+    // Gateway /v1/chat/completions 只接受 "openclaw" 或 "openclaw/<agentId>"
+    // 实际 LLM model 由服务端根据 agent 配置自动选择（如 qwen3.6-plus）
+    let gateway_model = format!("openclaw/{}", agent_id);
+    info!("[Chat Stream] 发起流式请求: agent={}, gateway_model={}, id={}", agent_id, gateway_model, request_id);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    // Gateway chat 端点只接受 openclaw 或 openclaw/<agentId> 作为 model 参数
+    // 实际 LLM 模型由服务端根据 agent 配置选择
+    let model_param = format!("openclaw/{}", agent_id);
+
+    let body = json!({
+        "model": model_param,
+        "stream": true,
+        "messages": messages,
+    });
+
+    let resp = client
+        .post("http://127.0.0.1:18789/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .header("x-openclaw-agent-id", &agent_id)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("请求 Gateway 失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().to_string();
+        let err_text = resp.text().await.unwrap_or_default();
+        let _ = app.emit("chat-stream", serde_json::json!({
+            "request_id": &request_id,
+            "content": "",
+            "done": true,
+            "error": format!("Gateway {}: {}", status, err_text),
+        }));
+        return Err(format!("Gateway 返回错误: {}", err_text));
+    }
+
+    let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
+    let mut accumulated = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("读取流失败: {}", e))?;
+        let chunk_str = String::from_utf8_lossy(&bytes);
+        buffer.push_str(&chunk_str);
+        let parts: Vec<String> = buffer.split('\n').map(|s| s.to_string()).collect();
+        if parts.len() > 1 {
+            buffer = parts.last().cloned().unwrap_or_default();
+            let data_lines: Vec<&String> = parts.iter().take(parts.len() - 1).collect();
+            for line in data_lines {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || !trimmed.starts_with("data: ") {
+                    continue;
+                }
+                let data = &trimmed[6..];
+                if data == "[DONE]" {
+                    let _ = app.emit("chat-stream", serde_json::json!({
+                        "request_id": &request_id,
+                        "content": &accumulated,
+                        "done": true,
+                        "error": serde_json::Value::Null,
+                    }));
+                    info!("[Chat Stream] 完成: id={}", request_id);
+                    return Ok("done".to_string());
+                }
+                if let Ok(parsed) = serde_json::from_str::<Value>(data) {
+                    // Qwen 模型会先返回 reasoning_content（思考过程），再返回 content（实际回复）
+                    let delta = parsed.pointer("/choices/0/delta/content")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| parsed.pointer("/choices/0/delta/reasoning_content").and_then(|v| v.as_str()))
+                        .unwrap_or("");
+                    debug!("[Chat Stream] SSE delta: content='{}' (accumulated len={})", delta, accumulated.len());
+                    if !delta.is_empty() {
+                        accumulated.push_str(delta);
+                        let _ = app.emit("chat-stream", serde_json::json!({
+                            "request_id": &request_id,
+                            "content": &accumulated,
+                            "done": false,
+                            "error": serde_json::Value::Null,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    // 流结束但没有 [DONE]
+    let _ = app.emit("chat-stream", serde_json::json!({
+        "request_id": &request_id,
+        "content": accumulated,
+        "done": true,
+        "error": Some("流异常结束（未收到 [DONE]）"),
+    }));
+    Ok("partial".to_string())
+}
+
+/// 获取当前主模型配置（agents.defaults.model.primary）
+#[command]
+pub async fn get_primary_model() -> Result<String, String> {
+    let config = load_openclaw_config()?;
+    let primary = config
+        .pointer("/agents/defaults/model/primary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("openrouter/qwen/qwen3.6-plus:free")
+        .to_string();
+    Ok(primary)
+}
+
 /// 设置默认 Agent
 #[command]
 pub async fn set_default_agent(agent_id: String) -> Result<String, String> {
@@ -2412,15 +2730,25 @@ pub async fn set_default_agent(agent_id: String) -> Result<String, String> {
 
     let mut config = load_openclaw_config()?;
 
-    if let Some(list) = config.pointer_mut("/agents/list").and_then(|v| v.as_array_mut()) {
-        for entry in list.iter_mut() {
-            let is_target = entry.get("id").and_then(|v| v.as_str()) == Some(&agent_id);
-            if let Some(obj) = entry.as_object_mut() {
-                if is_target {
-                    obj.insert("default".into(), json!(true));
-                } else {
-                    obj.remove("default");
+    // 兼容 agents.list 是数组或对象的情况
+    if let Some(list) = config.pointer_mut("/agents/list") {
+        if let Some(arr) = list.as_array_mut() {
+            for entry in arr.iter_mut() {
+                let is_target = entry.get("id").and_then(|v| v.as_str()) == Some(&agent_id);
+                if let Some(obj) = entry.as_object_mut() {
+                    if is_target {
+                        obj.insert("default".into(), json!(true));
+                    } else {
+                        obj.remove("default");
+                    }
                 }
+            }
+        } else if let Some(obj) = list.as_object_mut() {
+            let is_target = obj.get("id").and_then(|v| v.as_str());
+            if is_target == Some(&agent_id) {
+                obj.insert("default".into(), json!(true));
+            } else {
+                obj.remove("default");
             }
         }
     }

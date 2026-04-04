@@ -95,6 +95,12 @@ fn main() {
             // 聊天
             config::get_chat_endpoint_status,
             config::enable_chat_completions,
+            // Gateway HTTP 代理（避免 WebView 跨域）
+            config::fetch_gateway_models,
+            config::check_gateway_running,
+            config::send_chat_stream,
+            config::get_primary_model,
+            config::fetch_chat_history,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时发生错误");
