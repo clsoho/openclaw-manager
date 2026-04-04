@@ -101,6 +101,9 @@ fn main() {
             config::send_chat_stream,
             config::get_primary_model,
             config::fetch_chat_history,
+            // Chat iframe helpers
+            config::get_chat_token,
+            config::start_gateway,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时发生错误");

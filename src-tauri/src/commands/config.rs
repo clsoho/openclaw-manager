@@ -2758,3 +2758,46 @@ pub async fn set_default_agent(agent_id: String) -> Result<String, String> {
     Ok(format!("默认 Agent 已设为 {}", agent_id))
 }
 
+// =============================================================
+// Chat iframe helpers
+// =============================================================
+
+/// 获取 Gateway token
+#[command]
+pub async fn get_chat_token() -> Result<String, String> {
+    get_or_create_gateway_token().await
+}
+
+/// 启动 Gateway（调用 openclaw gateway restart）
+#[command]
+pub async fn start_gateway() -> Result<String, String> {
+    info!("[Gateway] 通过 CLI 启动...");
+    use std::process::Command as StdCommand;
+    
+    let home = dirs::home_dir().ok_or("无法获取用户目录")?;
+    let node_path = home.join("AppData").join("Roaming").join("npm").join("node.exe");
+    let openclaw_path = home.join("AppData").join("Roaming")
+        .join("npm").join("node_modules").join("openclaw")
+        .join("dist").join("index.js");
+
+    let _ = StdCommand::new(node_path)
+        .arg(openclaw_path)
+        .arg("gateway")
+        .arg("restart")
+        .output()
+        .map_err(|e| format!("无法启动 Gateway: {}", e))?;
+
+    // 等待 Gateway 就绪
+    for attempt in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(2000))
+            .build()
+            .map_err(|e| format!("HTTP 客户端失败: {}", e))?;
+        if client.get("http://127.0.0.1:18789/").send().await.is_ok() {
+            info!("[Gateway] 已就绪");
+            return Ok("OK Gateway 启动成功".to_string());
+        }
+    }
+    Ok("WARN Gateway 启动命令已发送".to_string())
+}
