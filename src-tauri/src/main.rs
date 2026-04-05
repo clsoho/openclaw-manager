@@ -100,6 +100,8 @@ fn main() {
             config::check_gateway_running,
             config::send_chat_stream,
             config::get_primary_model,
+            config::set_primary_model,
+            config::set_fallback_model,
             config::fetch_chat_history,
             // Chat iframe helpers
             config::get_chat_token,

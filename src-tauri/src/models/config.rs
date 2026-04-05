@@ -64,6 +64,9 @@ pub struct AgentModelConfig {
     /// 主模型 (格式: provider/model-id)
     #[serde(default)]
     pub primary: Option<String>,
+    /// 备用模型 (格式: provider/model-id)
+    #[serde(default)]
+    pub fallback: Option<String>,
 }
 
 /// 模型配置
@@ -247,6 +250,8 @@ pub struct ConfiguredModel {
     pub max_tokens: Option<u32>,
     /// 是否为主模型
     pub is_primary: bool,
+    /// 是否为备用模型（Fallback）
+    pub is_fallback: bool,
 }
 
 /// AI 配置概览（返回给前端）
@@ -254,6 +259,8 @@ pub struct ConfiguredModel {
 pub struct AIConfigOverview {
     /// 主模型
     pub primary_model: Option<String>,
+    /// 备用模型（Fallback）
+    pub fallback_model: Option<String>,
     /// 已配置的 Provider 列表
     pub configured_providers: Vec<ConfiguredProvider>,
     /// 可用模型列表

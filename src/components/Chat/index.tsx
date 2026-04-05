@@ -18,6 +18,8 @@ import {
   Zap,
   Play,
   Brain,
+  ArrowDownUp,
+  Star,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -60,6 +62,9 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   const [selectedAgent, setSelectedAgent] = useState<string>('main');
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('openclaw');
+  const [primaryModel, setPrimaryModel] = useState<string | null>(null);
+  const [fallbackModel, setFallbackModel] = useState<string | null>(null);
+  const [modelMode, setModelMode] = useState<'primary' | 'fallback'>('primary');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [gateway, setGateway] = useState<GatewayStatus>({
@@ -101,13 +106,32 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     try {
       const modelIds = await invoke<string[]>('fetch_gateway_models', { token: tkn });
       setModels(modelIds);
-      // 同步当前主模型配置
+      // 同步当前主模型和备用模型配置
       try {
-        const pm = await invoke<string>('get_primary_model');
-        setSelectedModel(pm);
-      } catch {
-        if (!modelIds.includes(selectedModel) && modelIds.length > 0) {
+        const overview = await invoke<any>('get_ai_config');
+        const pm = overview?.primary_model || overview?.primaryModel || null;
+        const fm = overview?.fallback_model || overview?.fallbackModel || null;
+        setPrimaryModel(pm);
+        setFallbackModel(fm);
+        // 默认使用主模型
+        if (modelMode === 'primary' && pm) {
+          setSelectedModel(pm);
+        } else if (modelMode === 'fallback' && fm) {
+          setSelectedModel(fm);
+        } else if (pm) {
+          setSelectedModel(pm);
+        } else if (!modelIds.includes(selectedModel) && modelIds.length > 0) {
           setSelectedModel(modelIds[0]);
+        }
+      } catch {
+        try {
+          const pm = await invoke<string>('get_primary_model');
+          setSelectedModel(pm);
+          setPrimaryModel(pm);
+        } catch {
+          if (!modelIds.includes(selectedModel) && modelIds.length > 0) {
+            setSelectedModel(modelIds[0]);
+          }
         }
       }
     } catch (e: unknown) {
@@ -116,7 +140,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     } finally {
       setLoadingModels(false);
     }
-  }, [selectedModel]);
+  }, [selectedModel, modelMode]);
 
   // ============ 加载聊天历史 ============
   const loadChatHistory = useCallback(async (aid: string, tkn: string) => {
@@ -411,7 +435,13 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     if (modelId === selectedModel) return;
     setSwitchingModel(true);
     try {
-      await invoke<string>('set_primary_model', { modelId });
+      if (modelMode === 'primary') {
+        await invoke('set_primary_model', { modelId });
+        setPrimaryModel(modelId);
+      } else {
+        await invoke('set_fallback_model', { modelId });
+        setFallbackModel(modelId);
+      }
       setSelectedModel(modelId);
       // 重启 Gateway 使新模型生效
       try {
@@ -426,6 +456,17 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       setSwitchingModel(false);
     }
   };
+
+  // ============ 切换 Primary / Fallback 模式 ============
+  const handleToggleModelMode = async () => {
+    const newMode = modelMode === 'primary' ? 'fallback' : 'primary';
+    setModelMode(newMode);
+    if (newMode === 'primary' && primaryModel) {
+      setSelectedModel(primaryModel);
+    } else if (newMode === 'fallback' && fallbackModel) {
+      setSelectedModel(fallbackModel);
+    }
+  };;
 
   // ============ 快捷键 ============
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -527,19 +568,31 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
           {/* 分隔线 */}
           <div className="w-px h-6 bg-edge" />
 
-          {/* 模型下拉选择器 */}
+          {/* 模型下拉选择器（Primary / Fallback 切换） */}
           <div className="relative" ref={modelDropdownRef}>
             <button
               onClick={() => setShowModelDropdown(!showModelDropdown)}
               disabled={loadingModels}
               className={clsx(
                 'flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-elevated hover:bg-surface-card border border-edge transition-all',
+                modelMode === 'fallback' && 'border-amber-500/50',
                 loadingModels && 'opacity-60 cursor-wait'
               )}
-              title="切换模型"
+              title={modelMode === 'primary' ? '使用主模型' : '使用备用模型 (Fallback)'}
             >
-              <Brain size={16} className="text-claw-400" />
-              <span className="text-sm font-medium text-content-primary max-w-40 truncate">
+              {modelMode === 'fallback' ? (
+                <ArrowDownUp size={16} className="text-amber-400" />
+              ) : (
+                <Brain size={16} className="text-claw-400" />
+              )}
+              {/* 模式标签 */}
+              <span className={clsx(
+                'text-xs font-bold px-1.5 py-0.5 rounded',
+                modelMode === 'fallback' ? 'bg-amber-500/20 text-amber-400' : 'bg-claw-500/20 text-claw-400'
+              )}>
+                {modelMode === 'fallback' ? 'FallBack' : 'Primary'}
+              </span>
+              <span className="text-sm font-medium text-content-primary max-w-32 truncate">
                 {formatModelLabel(selectedModel)}
               </span>
               {loadingModels ? (
@@ -560,42 +613,85 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
                   style={{ maxHeight: 'min(350px, 60vh)' }}
                 >
                   <div className="p-1">
+                    {/* 模式切换栏 */}
+                    <div className="flex items-center gap-1 mb-1">
+                      <button
+                        onClick={async () => {
+                          if (modelMode !== 'primary') {
+                            setModelMode('primary');
+                            if (primaryModel) setSelectedModel(primaryModel);
+                          }
+                        }}
+                        className={clsx(
+                          'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all',
+                          modelMode === 'primary'
+                            ? 'bg-claw-500/20 text-claw-300'
+                            : 'text-content-tertiary hover:bg-surface-elevated'
+                        )}
+                      >
+                        <Star size={12} />
+                        主模型
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (modelMode !== 'fallback') {
+                            setModelMode('fallback');
+                            if (fallbackModel) setSelectedModel(fallbackModel);
+                          }
+                        }}
+                        className={clsx(
+                          'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all',
+                          modelMode === 'fallback'
+                            ? 'bg-amber-500/20 text-amber-300'
+                            : 'text-content-tertiary hover:bg-surface-elevated'
+                        )}
+                      >
+                        <ArrowDownUp size={12} />
+                        备用模型
+                      </button>
+                    </div>
+
                     <p className="px-2 py-1 text-xs text-content-tertiary font-medium flex items-center gap-1">
-                      切换主模型
+                      {modelMode === 'primary' ? '切换主模型' : '切换备用模型'}
                       {switchingModel && <Loader2 size={10} className="animate-spin" />}
                       {modelFetchError && (
                         <span className="text-red-400 font-normal ml-1">（{modelFetchError}）</span>
                       )}
                     </p>
-                    <div className="overflow-y-auto scroll-container" style={{ maxHeight: 'min(300px, 50vh)' }}>
+                    <div className="overflow-y-auto scroll-container" style={{ maxHeight: 'min(260px, 45vh)' }}>
                       {models.length === 0 && !loadingModels && !modelFetchError && (
-                        <p className="px-2 py-3 text-xs text-content-tertiary text-center">
-                          暂无可用模型
-                        </p>
+                        <p className="px-2 py-3 text-xs text-content-tertiary text-center">暂无可用模型</p>
                       )}
-                      {models.map(modelId => (
-                        <button
-                          key={modelId}
-                          onClick={() => handleModelChange(modelId)}
-                          disabled={switchingModel}
-                          className={clsx(
-                            'w-full flex items-center gap-2 px-2 py-1.5 rounded text-left transition-all',
-                            switchingModel && 'pointer-events-none',
-                            selectedModel === modelId
-                              ? 'bg-claw-500/15 text-content-primary'
-                              : 'text-content-secondary hover:bg-surface-elevated'
-                          )}
-                        >
-                          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all"
-                            style={{ backgroundColor: selectedModel === modelId ? 'var(--color-claw-500)' : 'transparent' }} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium truncate">{formatModelLabel(modelId)}</p>
-                          </div>
-                          {switchingModel && selectedModel === modelId && (
-                            <Loader2 size={10} className="animate-spin text-claw-400 flex-shrink-0" />
-                          )}
-                        </button>
-                      ))}
+                      {models.map(modelId => {
+                        const isSelected = selectedModel === modelId;
+                        const isPrimary = primaryModel === modelId;
+                        const isFallback = fallbackModel === modelId;
+                        return (
+                          <button
+                            key={modelId}
+                            onClick={() => handleModelChange(modelId)}
+                            disabled={switchingModel}
+                            className={clsx(
+                              'w-full flex items-center gap-2 px-2 py-1.5 rounded text-left transition-all',
+                              switchingModel && 'pointer-events-none',
+                              isSelected
+                                ? modelMode === 'fallback' ? 'bg-amber-500/15 text-content-primary' : 'bg-claw-500/15 text-content-primary'
+                                : 'text-content-secondary hover:bg-surface-elevated'
+                            )}
+                          >
+                            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all"
+                              style={{ backgroundColor: isSelected ? (modelMode === 'fallback' ? 'var(--color-amber-500)' : 'var(--color-claw-500)') : 'transparent' }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">{formatModelLabel(modelId)}</p>
+                            </div>
+                            {isPrimary && <span className="text-[10px] text-claw-400 flex-shrink-0">主</span>}
+                            {isFallback && <span className="text-[10px] text-amber-400 flex-shrink-0">备</span>}
+                            {switchingModel && isSelected && (
+                              <Loader2 size={10} className="animate-spin text-claw-400 flex-shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                     {/* 刷新按钮 */}
                     <button

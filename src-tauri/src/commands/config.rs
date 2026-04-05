@@ -674,12 +674,18 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     let config = load_openclaw_config()?;
     debug!("[AI 配置] 配置内容: {}", serde_json::to_string_pretty(&config).unwrap_or_default());
 
-    // 解析主模型
+    // 解析主模型和 fallback 模型
     let primary_model = config
         .pointer("/agents/defaults/model/primary")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     info!("[AI 配置] 主模型: {:?}", primary_model);
+
+    let fallback_model = config
+        .pointer("/agents/defaults/model/fallback")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    info!("[AI 配置] 备用模型: {:?}", fallback_model);
 
     // 解析可用模型列表
     let available_models: Vec<String> = config
@@ -736,8 +742,9 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
                                 .to_string();
                             let full_id = format!("{}/{}", provider_name, id);
                             let is_primary = primary_model.as_ref() == Some(&full_id);
+                            let is_fallback = fallback_model.as_ref() == Some(&full_id);
 
-                            info!("[AI 配置] 解析模型: {} (is_primary: {})", full_id, is_primary);
+                            info!("[AI 配置] 解析模型: {} (is_primary: {}, is_fallback: {})", full_id, is_primary, is_fallback);
 
                             Some(ConfiguredModel {
                                 full_id,
@@ -753,6 +760,7 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
                                     .and_then(|v| v.as_u64())
                                     .map(|n| n as u32),
                                 is_primary,
+                                is_fallback,
                             })
                         })
                         .collect()
@@ -774,14 +782,16 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     }
 
     info!(
-        "[AI 配置] ✓ 最终结果 - 主模型: {:?}, {} 个 Provider, {} 个可用模型",
+        "[AI 配置] ✓ 最终结果 - 主模型: {:?}, 备用模型: {:?}, {} 个 Provider, {} 个可用模型",
         primary_model,
+        fallback_model,
         configured_providers.len(),
         available_models.len()
     );
 
     Ok(AIConfigOverview {
         primary_model,
+        fallback_model,
         configured_providers,
         available_models,
     })
@@ -957,6 +967,16 @@ pub async fn delete_provider(provider_name: String) -> Result<String, String> {
         }
     }
 
+    // 如果 fallback 模型属于该 Provider，清除 fallback
+    if let Some(fallback) = config
+        .pointer("/agents/defaults/model/fallback")
+        .and_then(|v| v.as_str())
+    {
+        if fallback.starts_with(&format!("{}/", provider_name)) {
+            config["agents"]["defaults"]["model"]["fallback"] = json!(null);
+        }
+    }
+
     save_openclaw_config(&config)?;
     info!("[删除 Provider] ✓ Provider {} 已删除", provider_name);
 
@@ -988,6 +1008,37 @@ pub async fn set_primary_model(model_id: String) -> Result<String, String> {
     info!("[设置主模型] ✓ 主模型已设置为: {}", model_id);
 
     Ok(format!("主模型已设置为 {}", model_id))
+}
+
+/// 设置备用模型（Fallback）
+#[command]
+pub async fn set_fallback_model(model_id: String) -> Result<String, String> {
+    info!("[设置备用模型] 设置备用模型: {}", model_id);
+
+    let mut config = load_openclaw_config()?;
+
+    // 确保路径存在
+    if config.get("agents").is_none() {
+        config["agents"] = json!({});
+    }
+    if config["agents"].get("defaults").is_none() {
+        config["agents"]["defaults"] = json!({});
+    }
+    if config["agents"]["defaults"].get("model").is_none() {
+        config["agents"]["defaults"]["model"] = json!({});
+    }
+
+    // 设置备用模型（空字符串表示清除）
+    if model_id.is_empty() {
+        config["agents"]["defaults"]["model"]["fallback"] = serde_json::Value::Null;
+        info!("[设置备用模型] ✓ 备用模型已清除");
+        Ok("备用模型已清除".to_string())
+    } else {
+        config["agents"]["defaults"]["model"]["fallback"] = json!(model_id);
+        save_openclaw_config(&config)?;
+        info!("[设置备用模型] ✓ 备用模型已设置为: {}", model_id);
+        Ok(format!("备用模型已设置为 {}", model_id))
+    }
 }
 
 /// 添加模型到可用列表
