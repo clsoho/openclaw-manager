@@ -166,15 +166,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target universal-apple-darwin
+          args: --target universal-apple-darwin --bundles dmg,macos
 
-      - name: Build Tauri app
-        if: matrix.platform != 'macos-latest'
+      - name: Build Tauri app (Windows)
+        if: matrix.platform == 'windows-latest'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target ${{ matrix.target }}
+          args: --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Build Tauri app (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }} --bundles deb,appimage
 
       # ── 上传构建产物 ─────────────────────────────────────
       - name: Upload macOS artifacts
