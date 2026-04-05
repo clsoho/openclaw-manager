@@ -2610,19 +2610,15 @@ pub async fn send_chat_stream(
 ) -> Result<String, String> {
     use futures_util::StreamExt;
 
-    // Gateway /v1/chat/completions 只接受 "openclaw" 或 "openclaw/<agentId>"
-    // 实际 LLM model 由服务端根据 agent 配置自动选择（如 qwen3.6-plus）
-    let gateway_model = format!("openclaw/{}", agent_id);
-    info!("[Chat Stream] 发起流式请求: agent={}, gateway_model={}, id={}", agent_id, gateway_model, request_id);
-
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    // Gateway chat 端点只接受 openclaw 或 openclaw/<agentId> 作为 model 参数
-    // 实际 LLM 模型由服务端根据 agent 配置选择
+    // Gateway /v1/chat/completions 只接受 "openclaw" 或 "openclaw/<agentId>"
+    // 无论前端选了哪个 LLM 模型，Gateway 内部会根据 agent 配置自动路由
     let model_param = format!("openclaw/{}", agent_id);
+    info!("[Chat Stream] 发起流式请求: agent={}, gateway_model={}, id={}", agent_id, model_param, request_id);
 
     let body = json!({
         "model": model_param,
@@ -2634,24 +2630,41 @@ pub async fn send_chat_stream(
         .post("http://127.0.0.1:18789/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
-        .header("x-openclaw-agent-id", &agent_id)
         .json(&body)
         .send()
         .await
         .map_err(|e| format!("请求 Gateway 失败: {}", e))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status().to_string();
+    // 先读取响应头和 body，然后判断类型再处理
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    if !content_type.contains("text/event-stream") && !content_type.contains("stream") {
+        // 不是 SSE — 读取完整 body 判断错误
         let err_text = resp.text().await.unwrap_or_default();
+        let error_msg = if let Ok(j) = serde_json::from_str::<Value>(&err_text) {
+            j.pointer("/error/message").and_then(|v| v.as_str())
+                .or_else(|| j.pointer("/content").and_then(|v| v.as_str()))
+                .unwrap_or("请求失败")
+                .to_string()
+        } else {
+            err_text
+        };
         let _ = app.emit("chat-stream", serde_json::json!({
             "request_id": &request_id,
             "content": "",
             "done": true,
-            "error": format!("Gateway {}: {}", status, err_text),
+            "error": format!("HTTP {} {}", status, error_msg),
         }));
-        return Err(format!("Gateway 返回错误: {}", err_text));
+        return Err(format!("Gateway HTTP {}: {}", status, error_msg));
     }
 
+    // SSE 流式响应
     let mut stream = resp.bytes_stream();
     let mut buffer = String::new();
     let mut accumulated = String::new();
@@ -2681,6 +2694,17 @@ pub async fn send_chat_stream(
                     return Ok("done".to_string());
                 }
                 if let Ok(parsed) = serde_json::from_str::<Value>(data) {
+                    // 检测错误响应
+                    if let Some(err) = parsed.pointer("/error/message").and_then(|v| v.as_str()) {
+                        warn!("[Chat Stream] SSE 错误: {}", err);
+                        let _ = app.emit("chat-stream", serde_json::json!({
+                            "request_id": &request_id,
+                            "content": "",
+                            "done": true,
+                            "error": err,
+                        }));
+                        return Ok("error".to_string());
+                    }
                     // Qwen 模型会先返回 reasoning_content（思考过程），再返回 content（实际回复）
                     let delta = parsed.pointer("/choices/0/delta/content")
                         .and_then(|v| v.as_str())
@@ -2695,6 +2719,19 @@ pub async fn send_chat_stream(
                             "done": false,
                             "error": serde_json::Value::Null,
                         }));
+                    }
+                    // 检查非流式响应中的 content 字段是否为错误信息
+                    if let Some(content) = parsed.pointer("/choices/0/message/content").and_then(|v| v.as_str()) {
+                        if content.starts_with("400 ") || content.starts_with("500 ") || content.contains("not a valid model") {
+                            warn!("[Chat Stream] 检测到错误响应内容: {}", content);
+                            let _ = app.emit("chat-stream", serde_json::json!({
+                                "request_id": &request_id,
+                                "content": "",
+                                "done": true,
+                                "error": content,
+                            }));
+                            return Ok("error".to_string());
+                        }
                     }
                 }
             }

@@ -72,6 +72,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   const [showAgentDropdown, setShowAgentDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [endpointStatus, setEndpointStatus] = useState<EndpointStatus | null>(null);
+  const currentRequestIdRef = useRef<string | null>(null);
   const [enablingEndpoint, setEnablingEndpoint] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -251,12 +252,18 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // ============ 停止生成 ============
+  const handleStop = () => {
+    currentRequestIdRef.current = null;
+  };
+
   // ============ 发送消息（通过 Rust 代理，避免 WebView 跨域） ============
   const handleSend = async () => {
     const text = inputText.trim();
-    if (!text || !gateway.token || sending) return;
+    if (!text || !gateway.token) return;
 
     const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    currentRequestIdRef.current = requestId;
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -291,6 +298,8 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     const unlisten = await listen('chat-stream', (event: { payload: { request_id: string; content: string; done: boolean; error: string | null } }) => {
       const { request_id, content, done, error } = event.payload;
       if (request_id !== requestId) return;
+      // 如果用户已取消，忽略后续事件
+      if (currentRequestIdRef.current !== requestId) return;
 
       setMessages(prev =>
         prev.map(m =>
@@ -308,6 +317,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
 
       if (done) {
         setSending(false);
+        currentRequestIdRef.current = null;
         inputRef.current?.focus();
         if (!error && !gateway.connected) {
           setGateway(prev => ({ ...prev, connected: true, running: true }));
@@ -337,17 +347,10 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
         )
       );
       setSending(false);
+      currentRequestIdRef.current = null;
     } finally {
       // 清理监听器（延迟一点确保最后一条事件已处理）
       setTimeout(() => { unlisten(); }, 500);
-      abortControllerRef.current = null;
-    }
-  };
-
-  // ============ 停止生成 ============
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
     }
   };
 
