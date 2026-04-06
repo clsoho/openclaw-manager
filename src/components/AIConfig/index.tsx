@@ -14,6 +14,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  ArrowDownUp,
   Cpu,
   Server,
   Sparkles,
@@ -85,6 +86,7 @@ interface ConfiguredProvider {
 
 interface AIConfigOverview {
   primary_model: string | null;
+  fallback_models: string[];
   configured_providers: ConfiguredProvider[];
   available_models: string[];
 }
@@ -1030,6 +1032,44 @@ export function AIConfig() {
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<AITestResult | null>(null);
+  // ============ Fallback 管理 ============
+  const [showFallbackDialog, setShowFallbackDialog] = useState(false);
+  const [tempFallbacks, setTempFallbacks] = useState<string[]>([]);
+
+  const handleOpenFallbackDialog = () => {
+    setTempFallbacks(aiConfig?.fallback_models || []);
+    setShowFallbackDialog(true);
+  };
+
+  const handleToggleFallback = (modelId: string) => {
+    setTempFallbacks(prev =>
+      prev.includes(modelId)
+        ? prev.filter(id => id !== modelId)
+        : [...prev, modelId]
+    );
+  };
+
+  const handleSaveFallbacks = async () => {
+    try {
+      await invoke('set_fallback_model', { models: tempFallbacks });
+      aiLogger.info(`备用模型已更新: ${tempFallbacks.length} 个`);
+      loadData();
+      setShowFallbackDialog(false);
+    } catch (e) {
+      alert('保存失败: ' + e);
+    }
+  };
+
+  const handleRemoveFallback = async (modelId: string) => {
+    const newList = aiConfig?.fallback_models.filter(id => id !== modelId) || [];
+    try {
+      await invoke('set_fallback_model', { models: newList });
+      aiLogger.info(`已移除备用模型: ${modelId}`);
+      loadData();
+    } catch (e) {
+      alert('移除失败: ' + e);
+    }
+  };
 
   const handleEditProvider = (provider: ConfiguredProvider) => {
     setEditingProvider(provider);
@@ -1184,6 +1224,41 @@ export function AIConfig() {
             </button>
           </div>
 
+          {/* 备用模型配置 */}
+          <div className="bg-surface-elevated/50 rounded-xl p-4 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
+              <ArrowDownUp size={24} className="text-purple-400" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm text-content-secondary">备用模型 (Fallback)</p>
+              {aiConfig?.fallback_models && aiConfig.fallback_models.length > 0 ? (
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {aiConfig.fallback_models.map(model => (
+                    <span key={model} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-card text-xs text-content-primary border border-edge">
+                      {model}
+                      <button
+                        onClick={() => handleRemoveFallback(model)}
+                        className="ml-1 hover:text-red-400"
+                        title="移除"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-content-tertiary">未设置备用模型</p>
+              )}
+            </div>
+            <button
+              onClick={handleOpenFallbackDialog}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <Plus size={16} />
+              设置备用
+            </button>
+          </div>
+
           {/* AI 测试结果 */}
           {testResult && (
             <motion.div
@@ -1321,6 +1396,82 @@ export function AIConfig() {
             onSave={loadData}
             editingProvider={editingProvider}
           />
+        )}
+      </AnimatePresence>
+
+      {/* 选择备用模型对话框 */}
+      <AnimatePresence>
+        {showFallbackDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={() => setShowFallbackDialog(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-surface-sidebar rounded-2xl border border-edge w-full max-w-2xl max-h-[85vh] overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* 头部 */}
+              <div className="px-6 py-4 border-b border-edge flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-content-primary flex items-center gap-2">
+                  <ArrowDownUp size={20} className="text-purple-400" />
+                  管理备用模型
+                </h2>
+                <button onClick={() => setShowFallbackDialog(false)} className="text-content-tertiary hover:text-content-primary">
+                  ✕
+                </button>
+              </div>
+              
+              {/* 内容 */}
+              <div className="p-6 overflow-y-auto max-h-[calc(85vh-140px)]">
+                <p className="text-sm text-content-secondary mb-4">选择多个模型作为备用。当主模型不可用时，将按顺序使用这些备用模型。</p>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {aiConfig?.available_models
+                    .filter(m => m !== aiConfig.primary_model)
+                    .map(modelId => {
+                      const isSelected = tempFallbacks.includes(modelId);
+                      return (
+                        <label
+                          key={modelId}
+                          className="flex items-center gap-3 p-3 rounded-xl bg-surface-card border border-edge hover:bg-surface-elevated cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleFallback(modelId)}
+                            className="w-4 h-4 rounded border-gray-300 text-claw-600 focus:ring-claw-500"
+                          />
+                          <span className="flex-1 text-sm text-content-primary">{modelId}</span>
+                          {isSelected && <Check size={16} className="text-claw-500" />}
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* 底部按钮 */}
+              <div className="px-6 py-4 border-t border-edge flex justify-end gap-3">
+                <button
+                  onClick={() => setShowFallbackDialog(false)}
+                  className="btn-secondary"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveFallbacks}
+                  disabled={tempFallbacks.length === 0}
+                  className="btn-primary"
+                >
+                  保存设置
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

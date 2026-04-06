@@ -17,7 +17,6 @@ import {
   Settings,
   Zap,
   Play,
-  Brain,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -58,8 +57,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   // ============ 状态 ============
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string>('main');
-  const [models, setModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('openclaw');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [gateway, setGateway] = useState<GatewayStatus>({
@@ -70,19 +67,14 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [showAgentDropdown, setShowAgentDropdown] = useState(false);
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [endpointStatus, setEndpointStatus] = useState<EndpointStatus | null>(null);
   const [enablingEndpoint, setEnablingEndpoint] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [modelFetchError, setModelFetchError] = useState<string | null>(null);
 
   // ============ Refs ============
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // ============ 滚动 ============
   const scrollToBottom = useCallback(() => {
@@ -92,30 +84,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
-
-  // ============ 拉取 LLM 模型列表（从 openclaw.json agents.defaults.models 读取）============
-  const fetchModels = useCallback(async (tkn: string) => {
-    setLoadingModels(true);
-    setModelFetchError(null);
-    try {
-      const modelIds = await invoke<string[]>('fetch_gateway_models', { token: tkn });
-      setModels(modelIds);
-      // 同步当前主模型配置
-      try {
-        const pm = await invoke<string>('get_primary_model');
-        setSelectedModel(pm);
-      } catch {
-        if (!modelIds.includes(selectedModel) && modelIds.length > 0) {
-          setSelectedModel(modelIds[0]);
-        }
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setModelFetchError(`模型列表获取失败: ${msg}`);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [selectedModel]);
 
   // ============ 加载聊天历史 ============
   const loadChatHistory = useCallback(async (aid: string, tkn: string) => {
@@ -178,10 +146,8 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
           }
         }
 
-        // 获取模型列表（通过 Rust 代理）
+        // 检查 Gateway 连通性
         if (token) {
-          await fetchModels(token);
-          // 检查 Gateway 连通性
           try {
             const isRunning = await invoke<boolean>('check_gateway_running', { token });
             setGateway(prev => ({ ...prev, connected: isRunning, running: isRunning }));
@@ -204,24 +170,20 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       }
     };
     init();
-  }, [initialAgentId, fetchModels, loadChatHistory]);
+  }, [initialAgentId, loadChatHistory]);
 
-  // ============ Gateway 心跳检测（通过 Tauri 命令） ============
+  // ============ Gateway 心跳检测 ============
   useEffect(() => {
     if (!gateway.token) return;
 
     const checkGateway = async () => {
       try {
         const isRunning = await invoke<boolean>('check_gateway_running', { token: gateway.token });
-        const wasConnected = gateway.connected;
         setGateway(prev => ({
           ...prev,
           running: isRunning,
           connected: isRunning,
         }));
-        if (!wasConnected && isRunning) {
-          fetchModels(gateway.token!);
-        }
       } catch {
         setGateway(prev => ({
           ...prev,
@@ -234,8 +196,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     checkGateway();
     const interval = setInterval(checkGateway, 15000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway.token, gateway.connected]);
+  }, [gateway.token]);
 
   // ============ 点击外部关闭下拉 ============
   useEffect(() => {
@@ -243,15 +204,12 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowAgentDropdown(false);
       }
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
-        setShowModelDropdown(false);
-      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // ============ 发送消息（通过 Rust 代理，避免 WebView 跨域） ============
+  // ============ 发送消息 ============
   const handleSend = async () => {
     const text = inputText.trim();
     if (!text || !gateway.token || sending) return;
@@ -322,12 +280,11 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       await invoke<string>('send_chat_stream', {
         token: gateway.token,
         agentId: selectedAgent,
-        model: selectedModel,
+        model: '',
         messages: recentMessages,
         requestId,
       });
     } catch (e: unknown) {
-      // 错误会通过事件传递，这里只是启动失败
       const errorMsg = e instanceof Error ? e.message : String(e);
       setMessages(prev =>
         prev.map(m =>
@@ -338,16 +295,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       );
       setSending(false);
     } finally {
-      // 清理监听器（延迟一点确保最后一条事件已处理）
       setTimeout(() => { unlisten(); }, 500);
-      abortControllerRef.current = null;
-    }
-  };
-
-  // ============ 停止生成 ============
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
     }
   };
 
@@ -365,7 +313,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
         const token = await invoke<string>('get_or_create_gateway_token').catch(() => null);
         if (token) {
           setGateway(prev => ({ ...prev, token }));
-          fetchModels(token);
         }
         setStartingGateway(false);
       }, 3000);
@@ -393,34 +340,10 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   const handleAgentChange = async (agentId: string) => {
     setSelectedAgent(agentId);
     setShowAgentDropdown(false);
-    // 加载新 Agent 的历史消息
     if (gateway.token) {
       await loadChatHistory(agentId, gateway.token);
     } else {
       setMessages([]);
-    }
-  };
-
-  // ============ 切换主模型（写入 openclaw.json 并重启 Gateway）============
-  const [switchingModel, setSwitchingModel] = useState(false);
-  const handleModelChange = async (modelId: string) => {
-    setShowModelDropdown(false);
-    if (modelId === selectedModel) return;
-    setSwitchingModel(true);
-    try {
-      await invoke<string>('set_primary_model', { modelId });
-      setSelectedModel(modelId);
-      // 重启 Gateway 使新模型生效
-      try {
-        await invoke<string>('restart_service');
-      } catch (e) {
-        console.error('重启 Gateway 失败:', e);
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setModelFetchError(`切换模型失败: ${msg}`);
-    } finally {
-      setSwitchingModel(false);
     }
   };
 
@@ -441,15 +364,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
 
   const currentAgent = agents.find(a => a.id === selectedAgent);
 
-  // 格式化模型名显示（去掉 openclaw/ 前缀更简洁）
-  const formatModelLabel = (modelId: string) => {
-    if (modelId === 'openclaw') return 'OpenClaw (默认)';
-    if (modelId === 'openclaw/default') return 'Default Agent';
-    if (modelId === 'openclaw/wokercoder') return 'WOkerCoder';
-    // 其他直接显示 ID
-    return modelId;
-  };
-
   // ============ Loading 状态 ============
   if (loading) {
     return (
@@ -464,9 +378,8 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     <div className="h-full flex flex-col">
       {/* ====== 顶栏 ====== */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-edge gap-2">
-        {/* 左侧：Agent + 模型 选择器 */}
+        {/* 左侧：Agent 选择器 */}
         <div className="flex items-center gap-2">
-          {/* Agent 下拉 */}
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setShowAgentDropdown(!showAgentDropdown)}
@@ -520,98 +433,10 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
               )}
             </AnimatePresence>
           </div>
-
-          {/* 分隔线 */}
-          <div className="w-px h-6 bg-edge" />
-
-          {/* 模型下拉选择器 */}
-          <div className="relative" ref={modelDropdownRef}>
-            <button
-              onClick={() => setShowModelDropdown(!showModelDropdown)}
-              disabled={loadingModels}
-              className={clsx(
-                'flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-elevated hover:bg-surface-card border border-edge transition-all',
-                loadingModels && 'opacity-60 cursor-wait'
-              )}
-              title="切换模型"
-            >
-              <Brain size={16} className="text-claw-400" />
-              <span className="text-sm font-medium text-content-primary max-w-40 truncate">
-                {formatModelLabel(selectedModel)}
-              </span>
-              {loadingModels ? (
-                <Loader2 size={12} className="animate-spin text-content-tertiary" />
-              ) : (
-                <ChevronDown size={14} className="text-content-tertiary" />
-              )}
-            </button>
-
-            <AnimatePresence>
-              {showModelDropdown && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -4, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute top-full left-0 mt-2 w-80 bg-surface-sidebar rounded-xl border border-edge shadow-xl z-50 overflow-hidden"
-                  style={{ maxHeight: 'min(350px, 60vh)' }}
-                >
-                  <div className="p-1">
-                    <p className="px-2 py-1 text-xs text-content-tertiary font-medium flex items-center gap-1">
-                      切换主模型
-                      {switchingModel && <Loader2 size={10} className="animate-spin" />}
-                      {modelFetchError && (
-                        <span className="text-red-400 font-normal ml-1">（{modelFetchError}）</span>
-                      )}
-                    </p>
-                    <div className="overflow-y-auto scroll-container" style={{ maxHeight: 'min(300px, 50vh)' }}>
-                      {models.length === 0 && !loadingModels && !modelFetchError && (
-                        <p className="px-2 py-3 text-xs text-content-tertiary text-center">
-                          暂无可用模型
-                        </p>
-                      )}
-                      {models.map(modelId => (
-                        <button
-                          key={modelId}
-                          onClick={() => handleModelChange(modelId)}
-                          disabled={switchingModel}
-                          className={clsx(
-                            'w-full flex items-center gap-2 px-2 py-1.5 rounded text-left transition-all',
-                            switchingModel && 'pointer-events-none',
-                            selectedModel === modelId
-                              ? 'bg-claw-500/15 text-content-primary'
-                              : 'text-content-secondary hover:bg-surface-elevated'
-                          )}
-                        >
-                          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all"
-                            style={{ backgroundColor: selectedModel === modelId ? 'var(--color-claw-500)' : 'transparent' }} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium truncate">{formatModelLabel(modelId)}</p>
-                          </div>
-                          {switchingModel && selectedModel === modelId && (
-                            <Loader2 size={10} className="animate-spin text-claw-400 flex-shrink-0" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                    {/* 刷新按钮 */}
-                    <button
-                      onClick={() => gateway.token && fetchModels(gateway.token)}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 rounded text-xs text-content-tertiary hover:text-content-primary hover:bg-surface-elevated transition-all border-t border-edge"
-                    >
-                      <Loader2 size={12} className={loadingModels ? 'animate-spin' : ''} />
-                      {loadingModels ? '刷新中...' : '刷新模型列表'}
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
         </div>
 
         {/* 右侧：连接状态 + 操作 */}
         <div className="flex items-center gap-2">
-          {/* 连接状态 */}
           <div className={clsx(
             'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs',
             gateway.connected
@@ -622,7 +447,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
             <span>{gateway.connected ? '已连接' : '未连接'}</span>
           </div>
 
-          {/* 清空按钮 */}
           {messages.length > 0 && (
             <button
               onClick={handleClear}
@@ -646,22 +470,8 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
               与 {currentAgent?.name || 'Agent'} 开始对话
             </h3>
 
-            {/* 当前配置提示 */}
-            <div className="flex flex-col items-center gap-1 mb-6">
-              <p className="text-xs text-content-tertiary">
-                Agent: <span className="text-content-secondary">{currentAgent?.name}</span>
-                {' · '}
-                模型: <span className="text-content-secondary">{formatModelLabel(selectedModel)}</span>
-              </p>
-              {models.length > 0 && (
-                <p className="text-xs text-content-tertiary">
-                  共 {models.length} 个可用模型
-                </p>
-              )}
-            </div>
-
             {gateway.connected && endpointStatus && !endpointStatus.enabled ? (
-              <div className="max-w-sm space-y-4">
+              <div className="max-w-sm space-y-4 mt-6">
                 <div className="flex items-start gap-3 px-4 py-3 bg-amber-500/10 rounded-xl text-left">
                   <Settings size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
                   <div>
@@ -690,7 +500,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
             ) : (
               <>
                 {!gateway.connected && !gateway.running ? (
-                  <div className="max-w-sm space-y-4">
+                  <div className="max-w-sm space-y-4 mt-6">
                     <div className="flex items-start gap-3 px-4 py-3 bg-amber-500/10 rounded-xl text-left">
                       <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
                       <div>
@@ -714,13 +524,13 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
                     </button>
                   </div>
                 ) : !gateway.connected ? (
-                  <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 rounded-xl text-amber-400 text-sm">
+                  <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 rounded-xl text-amber-400 text-sm mt-6">
                     <AlertCircle size={16} />
                     <span>Gateway 已运行但 API 不可达，请检查配置</span>
                   </div>
                 ) : (
-                  <p className="text-sm text-content-tertiary max-w-sm mb-6">
-                    输入消息开始聊天，支持多轮对话。按 Enter 发送，Shift+Enter 换行。
+                  <p className="text-sm text-content-tertiary max-w-sm mt-6">
+                    输入消息开始聊天，支持多轮对话。模型设置请在「AI 配置」页面中调整。
                   </p>
                 )}
               </>
@@ -790,7 +600,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   gateway.connected
-                    ? `发送消息给 ${currentAgent?.name || 'Agent'} (${formatModelLabel(selectedModel)})...`
+                    ? `发送消息给 ${currentAgent?.name || 'Agent'}...`
                     : 'Gateway 未连接...'
                 }
                 disabled={!gateway.connected}
@@ -802,7 +612,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
 
             {sending ? (
               <button
-                onClick={handleStop}
+                onClick={() => setSending(false)}
                 className="p-3 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all flex-shrink-0"
                 title="停止生成"
               >
@@ -820,9 +630,8 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
             )}
           </div>
 
-          {/* 提示文字 */}
           <p className="text-xs text-content-tertiary mt-2 text-center">
-            Enter 发送 · Shift+Enter 换行 · 对话历史随会话保留
+            Enter 发送 · Shift+Enter 换行 · 模型配置请前往「AI 配置」页面
           </p>
         </div>
       </div>

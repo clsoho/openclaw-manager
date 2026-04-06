@@ -259,8 +259,8 @@ pub struct ConfiguredModel {
 pub struct AIConfigOverview {
     /// 主模型
     pub primary_model: Option<String>,
-    /// 备用模型（Fallback）
-    pub fallback_model: Option<String>,
+    /// 备用模型列表（Fallbacks）
+    pub fallback_models: Vec<String>,
     /// 已配置的 Provider 列表
     pub configured_providers: Vec<ConfiguredProvider>,
     /// 可用模型列表

@@ -795,16 +795,16 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     }
 
     info!(
-        "[AI 配置] ✓ 最终结果 - 主模型: {:?}, 备用模型: {:?}, {} 个 Provider, {} 个可用模型",
+        "[AI 配置] ✓ 最终结果 - 主模型: {:?}, 备用模型列表: {:?}, {} 个 Provider, {} 个可用模型",
         primary_model,
-        fallback_model,
+        fallback_models,
         configured_providers.len(),
         available_models.len()
     );
 
     Ok(AIConfigOverview {
         primary_model,
-        fallback_model,
+        fallback_models,
         configured_providers,
         available_models,
     })
@@ -1027,11 +1027,10 @@ pub async fn set_primary_model(model_id: String) -> Result<String, String> {
 }
 
 /// 设置备用模型（Fallback）
-/// 注意：OpenClaw 配置使用 `agents.defaults.model.fallbacks` 数组格式。
-/// 这里为保持前端兼容，只设置单个 fallback（写入数组的第一个元素）。
+/// 设置备用模型列表（Fallbacks）
 #[command]
-pub async fn set_fallback_model(model_id: String) -> Result<String, String> {
-    info!("[设置备用模型] 设置备用模型: {}", model_id);
+pub async fn set_fallback_model(models: Vec<String>) -> Result<String, String> {
+    info!("[设置备用模型] 设置备用模型列表（{} 个）", models.len());
 
     let mut config = load_openclaw_config()?;
 
@@ -1046,13 +1045,12 @@ pub async fn set_fallback_model(model_id: String) -> Result<String, String> {
         config["agents"]["defaults"]["model"] = json!({});
     }
 
-    // OpenClaw 要求 fallbacks 是数组格式。我们写入单个元素的数组（保持前端单 fallback UI 兼容）
-    let fallbacks = if model_id.is_empty() { Vec::new() } else { vec![model_id.clone()] };
-    config["agents"]["defaults"]["model"]["fallbacks"] = json!(fallbacks);
+    // 写入 fallbacks 数组
+    config["agents"]["defaults"]["model"]["fallbacks"] = json!(models);
 
     save_openclaw_config(&config)?;
-    info!("[设置备用模型] ✓ 备用模型已设置为: {}", model_id);
-    Ok(format!("备用模型已设置为 {}", model_id))
+    info!("[设置备用模型] ✓ 备用模型已设置为: {:?}", models);
+    Ok(format!("备用模型已设置为 {:?}", models))
 }
 
 /// 添加模型到可用列表
