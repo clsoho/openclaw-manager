@@ -2293,6 +2293,51 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
         .map(|entry| parse_agent_entry(entry, &all_bindings))
         .collect();
 
+    // 如果 Gateway 可用，从 /v1/agents 拉取完整 Agent 列表（包含 workspace agents）
+    if let Ok(token) = get_or_create_gateway_token().await {
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:18789/v1/agents?token={}", token);
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(remote_agents) = resp.json::<Vec<Value>>().await {
+                    for item in remote_agents {
+                        let id_opt = item.get("id").and_then(|v| v.as_str());
+                        let id = id_opt.unwrap_or_default().to_string();
+                        if id.is_empty() { continue; }
+                        if agents.iter().any(|a| a.id == id) { continue; }
+                        let name = item.get("name").and_then(|v| v.as_str())
+                            .unwrap_or(id_opt.unwrap_or("Unnamed")).to_string();
+                        let emoji = item.get("emoji").and_then(|v| v.as_str())
+                            .unwrap_or("🤖").to_string();
+                        let is_default = item.get("isDefault").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let workspace = item.get("workspace")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("~/.openclaw/workspace")
+                            .to_string();
+
+                        agents.push(AgentConfig {
+                            id,
+                            name,
+                            emoji,
+                            theme: None,
+                            workspace,
+                            agent_dir: None,
+                            model: None,
+                            is_default,
+                            sandbox_mode: "off".to_string(),
+                            tools_profile: None,
+                            tools_allow: vec![],
+                            tools_deny: vec![],
+                            bindings: vec![],
+                            mention_patterns: vec![],
+                            subagent_allow: vec!["*".to_string()],
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     // 始终注入 main Agent（它是 Gateway 隐含的默认 Agent，不在配置中显式存在）
     if !agents.iter().any(|a| a.id == "main") {
         info!("[Agent 管理] ✓ 注入隐式 main Agent");
@@ -2708,9 +2753,9 @@ pub async fn send_chat_stream(
         "messages": messages,
     });
 
+    let url = format!("http://127.0.0.1:18789/v1/chat/completions?token={}", token);
     let resp = client
-        .post("http://127.0.0.1:18789/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", token))
+        .post(&url)
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
