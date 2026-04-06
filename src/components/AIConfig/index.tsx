@@ -1194,12 +1194,12 @@ export function AIConfig() {
             <div className="w-12 h-12 rounded-xl bg-claw-500/20 flex items-center justify-center">
               <Star size={24} className="text-claw-400" />
             </div>
-            <div className="flex-1">
-              <p className="text-sm text-content-secondary">当前主模型</p>
+            <div className="flex-1 flex flex-col justify-center">
+              <p className="text-sm text-content-secondary mb-1">当前主模型</p>
               {aiConfig?.primary_model ? (
-                <p className="text-lg font-medium text-content-primary">{aiConfig.primary_model}</p>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-card text-sm text-content-primary border border-edge w-fit"><Star size={12} className="text-yellow-500" />{aiConfig.primary_model}</span>
               ) : (
-                <p className="text-lg text-content-tertiary">未设置</p>
+                <span className="text-sm text-content-tertiary">未设置</span>
               )}
             </div>
             <div className="text-right mr-4">
