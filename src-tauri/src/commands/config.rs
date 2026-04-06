@@ -2572,16 +2572,35 @@ pub async fn fetch_chat_history(agent_id: String, token: String, limit: Option<u
     
     let (mut ws_send, mut ws_recv) = ws_stream.split();
     
-    // Gateway 自定义协议帧：{type: "req", id, method, params}
+    // 先发送 connect 握手
+    let session_key = if agent_id == "main" { "main" } else { &agent_id };
+    let connect_msg = json!({
+        "type": "connect",
+        "sessionKey": session_key,
+    });
+    info!("[聊天历史] 发送 connect 握手: {}", connect_msg);
+    ws_send.send(TsMessage::Text(connect_msg.to_string().into())).await
+        .map_err(|e| format!("发送 connect 失败: {}", e))?;
+    
+    // 等待 connect 响应（不阻塞流程，如果失败后面会继续尝试）
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        async {
+            while let Some(msg_result) = ws_recv.next().await {
+                if let Ok(TsMessage::Text(text)) = msg_result {
+                    if let Ok(resp) = serde_json::from_str::<Value>(&text) {
+                        if resp.get("type").and_then(|v| v.as_str()) == Some("connected") {
+                            info!("[聊天历史] connect 成功");
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    ).await;
+    
+    // 发送 chat.history 请求
     let req_id = format!("hist-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
-    
-    // sessionKey: main agent 直接用 "main"，其他 agent 用 agent ID
-    let session_key = if agent_id == "main" {
-        "main".to_string()
-    } else {
-        agent_id.clone()
-    };
-    
     let req = json!({
         "type": "req",
         "id": &req_id,
