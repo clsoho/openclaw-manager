@@ -97,7 +97,7 @@ jobs:
         include:
           # macOS - Universal (Intel + Apple Silicon)
           - platform: macos-latest
-            target: universal-apple-darwin
+            target: universal-darwin
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             label: macOS
           # Windows
@@ -170,7 +170,7 @@ jobs:
         if: matrix.platform == 'windows-latest'
         uses: tauri-apps/tauri-action@v1
         with:
-          args: --target x86_64-pc-windows-msvc --bundles nsis,msi
+          args: --target x86_64-pc-windows-msvc --bundles nsis
 
       - name: Build Tauri app (Linux)
         if: startsWith(matrix.platform, 'ubuntu')
