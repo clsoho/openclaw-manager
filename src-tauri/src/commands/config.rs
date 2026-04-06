@@ -1,7 +1,6 @@
 ﻿use crate::models::{
     AIConfigOverview, ChannelConfig, ConfiguredModel, ConfiguredProvider,
-    ModelConfig, ModelCostConfig, OfficialProvider, OpenClawConfig,
-    ProviderConfig, SuggestedModel,
+    ModelConfig, OfficialProvider, SuggestedModel,
 };
 use crate::utils::{file, platform, shell};
 use log::{debug, error, info, warn};
@@ -1557,7 +1556,7 @@ pub async fn install_qqbot_plugin() -> Result<String, String> {
 
 // ============ 技能库管理 ============
 
-use crate::models::{SkillDefinition, SkillConfigField, SkillSelectOption};
+use crate::models::{SkillDefinition, SkillConfigField};
 
 /// 获取内置技能预设清单
 fn get_preset_skills() -> Vec<SkillDefinition> {
@@ -2689,7 +2688,7 @@ pub async fn send_chat_stream(
     app: tauri::AppHandle,
     token: String,
     agent_id: String,
-    model: String,
+    _model: String,
     messages: Vec<serde_json::Value>,
     request_id: String,
 ) -> Result<String, String> {
@@ -2910,7 +2909,7 @@ pub async fn start_gateway() -> Result<String, String> {
         .map_err(|e| format!("无法启动 Gateway: {}", e))?;
 
     // 等待 Gateway 就绪
-    for attempt in 0..20 {
+    for _attempt in 0..20 {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_millis(2000))
