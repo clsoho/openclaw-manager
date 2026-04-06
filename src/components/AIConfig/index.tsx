@@ -3,17 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
 import {
-  Check,
-  Eye,
-  EyeOff,
   Loader2,
   Plus,
   Trash2,
   Star,
-  Settings2,
-  ExternalLink,
   ChevronDown,
-  ChevronRight,
   Cpu,
   Server,
   Sparkles,
@@ -47,23 +41,6 @@ interface OfficialProvider {
   requires_api_key: boolean;
   docs_url: string | null;
   auth_type: string;
-}
-
-interface DeviceFlowResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  expires_in: number;
-  interval: number;
-}
-
-interface CopilotAuthResult {
-  success: boolean;
-  access_token: string | null;
-  user_code: string | null;
-  verification_uri: string | null;
-  expires_in: number | null;
-  error: string | null;
 }
 
 interface ConfiguredModel {
@@ -223,8 +200,43 @@ function ProviderCard({ provider, officialProviders, onSetPrimary, onSetFallback
 
 // ============ 主组件 ============
 
+interface ProviderDialogProps {
+  officialProviders: OfficialProvider[];
+  onClose: () => void;
+  onSave: () => void;
+  editingProvider?: ConfiguredProvider | null;
+}
+
+function ProviderDialog({ officialProviders: _officialProviders, onClose, onSave: _onSave, editingProvider }: ProviderDialogProps) {
+  // 简化版对话框：TODO 恢复完整实现
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 10 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 10 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-surface-card border border-edge rounded-2xl p-6 max-w-lg w-full"
+      >
+        <h2 className="text-xl font-semibold text-content-primary mb-4">
+          {editingProvider ? '编辑 Provider' : '添加 Provider'}
+        </h2>
+        <p className="text-content-tertiary">Provider 管理功能正在恢复中...</p>
+        <div className="mt-6 flex justify-end">
+          <button onClick={onClose} className="btn-secondary">关闭</button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export function AIConfig() {
-  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [officialProviders, setOfficialProviders] = useState<OfficialProvider[]>([]);
   const [aiConfig, setAiConfig] = useState<AIConfigOverview | null>(null);

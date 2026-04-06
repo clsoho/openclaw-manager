@@ -674,18 +674,31 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     let config = load_openclaw_config()?;
     debug!("[AI 配置] 配置内容: {}", serde_json::to_string_pretty(&config).unwrap_or_default());
 
-    // 解析主模型和 fallback 模型
+    // 解析主模型和 fallback 模型（支持单个 fallback 字符串或 fallbacks 数组）
     let primary_model = config
         .pointer("/agents/defaults/model/primary")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     info!("[AI 配置] 主模型: {:?}", primary_model);
 
-    let fallback_model = config
-        .pointer("/agents/defaults/model/fallback")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    info!("[AI 配置] 备用模型: {:?}", fallback_model);
+    // OpenClaw 配置支持两种格式：
+    // - 旧格式: "fallback": "model-id"
+    // - 新格式: "fallbacks": ["model1", "model2"]
+    // 为兼容性，同时读取这两种，并优先使用 fallbacks 数组
+    let fallback_models: Vec<String> = {
+        // 优先读取 fallbacks 数组
+        if let Some(arr) = config.pointer("/agents/defaults/model/fallbacks").and_then(|v| v.as_array()) {
+            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+        } else if let Some(s) = config.pointer("/agents/defaults/model/fallback").and_then(|v| v.as_str()) {
+            // 兼容旧格式单个字符串
+            vec![s.to_string()]
+        } else {
+            vec![]
+        }
+    };
+    // 取第一个 fallback 用于前端单显示（保持现有 UI 不变）
+    let fallback_model = fallback_models.first().cloned();
+    info!("[AI 配置] 备用模型列表: {:?}, 使用第一个: {:?}", fallback_models, fallback_model);
 
     // 解析可用模型列表
     let available_models: Vec<String> = config
@@ -742,7 +755,8 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
                                 .to_string();
                             let full_id = format!("{}/{}", provider_name, id);
                             let is_primary = primary_model.as_ref() == Some(&full_id);
-                            let is_fallback = fallback_model.as_ref() == Some(&full_id);
+                            // 支持多 fallback：检查该模型是否在 fallback_models 列表中
+                            let is_fallback = fallback_models.iter().any(|fb| fb == &full_id);
 
                             info!("[AI 配置] 解析模型: {} (is_primary: {}, is_fallback: {})", full_id, is_primary, is_fallback);
 
@@ -967,14 +981,17 @@ pub async fn delete_provider(provider_name: String) -> Result<String, String> {
         }
     }
 
-    // 如果 fallback 模型属于该 Provider，清除 fallback
-    if let Some(fallback) = config
-        .pointer("/agents/defaults/model/fallback")
-        .and_then(|v| v.as_str())
+    // 如果 fallbacks 中的任何模型属于该 Provider，清除它们
+    if let Some(fallbacks) = config
+        .pointer_mut("/agents/defaults/model/fallbacks")
+        .and_then(|v| v.as_array_mut())
     {
-        if fallback.starts_with(&format!("{}/", provider_name)) {
-            config["agents"]["defaults"]["model"]["fallback"] = json!(null);
-        }
+        let provider_prefix = format!("{}/", provider_name);
+        fallbacks.retain(|fb| {
+            fb.as_str()
+                .map(|s| !s.starts_with(&provider_prefix))
+                .unwrap_or(true)
+        });
     }
 
     save_openclaw_config(&config)?;
@@ -1011,6 +1028,8 @@ pub async fn set_primary_model(model_id: String) -> Result<String, String> {
 }
 
 /// 设置备用模型（Fallback）
+/// 注意：OpenClaw 配置使用 `agents.defaults.model.fallbacks` 数组格式。
+/// 这里为保持前端兼容，只设置单个 fallback（写入数组的第一个元素）。
 #[command]
 pub async fn set_fallback_model(model_id: String) -> Result<String, String> {
     info!("[设置备用模型] 设置备用模型: {}", model_id);
@@ -1028,17 +1047,13 @@ pub async fn set_fallback_model(model_id: String) -> Result<String, String> {
         config["agents"]["defaults"]["model"] = json!({});
     }
 
-    // 设置备用模型（空字符串表示清除）
-    if model_id.is_empty() {
-        config["agents"]["defaults"]["model"]["fallback"] = serde_json::Value::Null;
-        info!("[设置备用模型] ✓ 备用模型已清除");
-        Ok("备用模型已清除".to_string())
-    } else {
-        config["agents"]["defaults"]["model"]["fallback"] = json!(model_id);
-        save_openclaw_config(&config)?;
-        info!("[设置备用模型] ✓ 备用模型已设置为: {}", model_id);
-        Ok(format!("备用模型已设置为 {}", model_id))
-    }
+    // OpenClaw 要求 fallbacks 是数组格式。我们写入单个元素的数组（保持前端单 fallback UI 兼容）
+    let fallbacks = if model_id.is_empty() { Vec::new() } else { vec![model_id.clone()] };
+    config["agents"]["defaults"]["model"]["fallbacks"] = json!(fallbacks);
+
+    save_openclaw_config(&config)?;
+    info!("[设置备用模型] ✓ 备用模型已设置为: {}", model_id);
+    Ok(format!("备用模型已设置为 {}", model_id))
 }
 
 /// 添加模型到可用列表

@@ -86,7 +86,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
   // ============ Refs ============
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -456,17 +455,6 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       setSwitchingModel(false);
     }
   };
-
-  // ============ 切换 Primary / Fallback 模式 ============
-  const handleToggleModelMode = async () => {
-    const newMode = modelMode === 'primary' ? 'fallback' : 'primary';
-    setModelMode(newMode);
-    if (newMode === 'primary' && primaryModel) {
-      setSelectedModel(primaryModel);
-    } else if (newMode === 'fallback' && fallbackModel) {
-      setSelectedModel(fallbackModel);
-    }
-  };;
 
   // ============ 快捷键 ============
   const handleKeyDown = (e: React.KeyboardEvent) => {
