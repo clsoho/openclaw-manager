@@ -50,16 +50,55 @@ pub fn read_env_value(env_file: &str, key: &str) -> Option<String> {
     
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with(&format!("export {}=", key)) {
-            let value = line
-                .trim_start_matches(&format!("export {}=", key))
-                .trim_matches('"')
-                .trim_matches('\'');
-            return Some(value.to_string());
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        if let Some((line_key, raw_value)) = line.split_once('=') {
+            if line_key.trim() == key {
+                return Some(unescape_env_value(raw_value.trim()));
+            }
         }
     }
     
     None
+}
+
+fn escape_env_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+        .replace('\n', "\\n")
+}
+
+fn unescape_env_value(value: &str) -> String {
+    let value = value.trim();
+    let value = if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            &value[1..value.len() - 1]
+        } else {
+            value
+        }
+    } else {
+        value
+    };
+
+    let mut result = String::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some(next) => result.push(next),
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 /// 设置环境变量文件中的值
@@ -67,11 +106,16 @@ pub fn set_env_value(env_file: &str, key: &str, value: &str) -> io::Result<()> {
     let content = read_file(env_file).unwrap_or_default();
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     
-    let new_line = format!("export {}=\"{}\"", key, value);
+    let new_line = format!("export {}=\"{}\"", key, escape_env_value(value));
     let mut found = false;
     
     for line in &mut lines {
-        if line.starts_with(&format!("export {}=", key)) {
+        let existing = line.trim().strip_prefix("export ").unwrap_or(line.trim());
+        let matches_key = existing
+            .split_once('=')
+            .map(|(line_key, _)| line_key.trim() == key)
+            .unwrap_or(false);
+        if matches_key {
             *line = new_line.clone();
             found = true;
             break;
@@ -90,7 +134,13 @@ pub fn remove_env_value(env_file: &str, key: &str) -> io::Result<()> {
     let content = read_file(env_file).unwrap_or_default();
     let lines: Vec<String> = content
         .lines()
-        .filter(|line| !line.starts_with(&format!("export {}=", key)))
+        .filter(|line| {
+            let existing = line.trim().strip_prefix("export ").unwrap_or(line.trim());
+            existing
+                .split_once('=')
+                .map(|(line_key, _)| line_key.trim() != key)
+                .unwrap_or(true)
+        })
         .map(|s| s.to_string())
         .collect();
     

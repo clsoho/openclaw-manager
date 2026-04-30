@@ -2936,19 +2936,8 @@ pub async fn get_chat_token() -> Result<String, String> {
 #[command]
 pub async fn start_gateway() -> Result<String, String> {
     info!("[Gateway] 通过 CLI 启动...");
-    use std::process::Command as StdCommand;
-    
-    let home = dirs::home_dir().ok_or("无法获取用户目录")?;
-    let node_path = home.join("AppData").join("Roaming").join("npm").join("node.exe");
-    let openclaw_path = home.join("AppData").join("Roaming")
-        .join("npm").join("node_modules").join("openclaw")
-        .join("dist").join("index.js");
 
-    let _ = StdCommand::new(node_path)
-        .arg(openclaw_path)
-        .arg("gateway")
-        .arg("restart")
-        .output()
+    shell::run_openclaw(&["gateway", "restart"])
         .map_err(|e| format!("无法启动 Gateway: {}", e))?;
 
     // 等待 Gateway 就绪

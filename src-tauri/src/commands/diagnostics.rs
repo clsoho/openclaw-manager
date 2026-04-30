@@ -903,25 +903,20 @@ pub async fn run_security_scan() -> Result<Vec<SecurityIssue>, String> {
     {
         info!("[安全扫描] 检查配置文件权限...");
         let env_path = platform::get_env_file_path();
-        if std::path::Path::new(&env_path).exists() {
-            if let Ok(output) = shell::run_bash_output(&format!("stat -c '%a' {} 2>/dev/null || stat -f '%Lp' {} 2>/dev/null", env_path, env_path)) {
-                let perms = output.trim();
-                // 环境变量文件不应该对其他用户可读（应该是 600 或 700）
-                if perms != "600" && perms != "700" && perms.len() == 3 {
-                    let other_perm = perms.chars().last().unwrap_or('0');
-                    if other_perm != '0' {
-                        issues.push(SecurityIssue {
-                            id: "env_file_perms".to_string(),
-                            title: "环境变量文件权限过宽".to_string(),
-                            description: format!("~/.openclaw/env 文件权限为 {}，其他用户可能读取其中的 API Key 等敏感信息。", perms),
-                            severity: "medium".to_string(),
-                            fixable: true,
-                            fixed: false,
-                            category: "permissions".to_string(),
-                            detail: Some("运行 chmod 600 ~/.openclaw/env 限制文件权限。".to_string()),
-                        });
-                    }
-                }
+        if let Ok(metadata) = std::fs::metadata(&env_path) {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = metadata.permissions().mode() & 0o777;
+            if mode & 0o077 != 0 {
+                issues.push(SecurityIssue {
+                    id: "env_file_perms".to_string(),
+                    title: "环境变量文件权限过宽".to_string(),
+                    description: format!("~/.openclaw/env 文件权限为 {:o}，其他用户可能读取其中的 API Key 等敏感信息。", mode),
+                    severity: "medium".to_string(),
+                    fixable: true,
+                    fixed: false,
+                    category: "permissions".to_string(),
+                    detail: Some("运行 chmod 600 ~/.openclaw/env 限制文件权限。".to_string()),
+                });
             }
         }
     }
@@ -1006,7 +1001,8 @@ pub async fn fix_security_issues(issue_ids: Vec<String>) -> Result<SecurityFixRe
                 #[cfg(not(target_os = "windows"))]
                 {
                     let env_path = platform::get_env_file_path();
-                    match shell::run_bash_output(&format!("chmod 600 {}", env_path)) {
+                    use std::os::unix::fs::PermissionsExt;
+                    match std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o600)) {
                         Ok(_) => {
                             info!("[安全修复] 文件权限已修复为 600");
                             fixed_ids.push(id.clone());

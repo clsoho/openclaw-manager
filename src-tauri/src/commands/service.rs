@@ -1,6 +1,8 @@
 use crate::models::ServiceStatus;
-use crate::utils::shell;
+use crate::utils::{file, platform, shell};
 use tauri::command;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::process::Command;
 use log::{info, debug};
 
@@ -44,7 +46,7 @@ fn check_port_listening(port: u16) -> Option<u32> {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
-                if line.contains(&format!(":{}", port)) && line.contains("LISTENING") {
+                if netstat_line_listens_on_port(line, port) {
                     if let Some(pid_str) = line.split_whitespace().last() {
                         if let Ok(pid) = pid_str.parse::<u32>() {
                             return Some(pid);
@@ -55,6 +57,18 @@ fn check_port_listening(port: u16) -> Option<u32> {
         }
         None
     }
+}
+
+#[cfg(windows)]
+fn netstat_line_listens_on_port(line: &str, port: u16) -> bool {
+    if !line.contains("LISTENING") {
+        return false;
+    }
+    line.split_whitespace()
+        .nth(1)
+        .and_then(|addr| addr.rsplit_once(':').map(|(_, p)| p))
+        .and_then(|p| p.parse::<u16>().ok())
+        == Some(port)
 }
 
 /// 获取服务状态（简单版：直接检查端口占用）
@@ -145,7 +159,7 @@ fn get_pids_on_port(port: u16) -> Vec<u32> {
             Ok(out) if out.status.success() => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 stdout.lines()
-                    .filter(|line| line.contains(&format!(":{}", port)) && line.contains("LISTENING"))
+                    .filter(|line| netstat_line_listens_on_port(line, port))
                     .filter_map(|line| line.split_whitespace().last())
                     .filter_map(|pid_str| pid_str.parse::<u32>().ok())
                     .collect()
@@ -244,38 +258,30 @@ pub async fn restart_service() -> Result<String, String> {
 pub async fn get_logs(lines: Option<u32>) -> Result<Vec<String>, String> {
     let n = lines.unwrap_or(100);
     
-    let config_dir = crate::utils::platform::get_config_dir();
-    
     // 尝试多个已知的日志文件位置
-    let log_files = vec![
-        format!("{}/logs/gateway.log", config_dir),
-        format!("{}/logs/gateway.err.log", config_dir),
-        format!("{}/stderr.log", config_dir),
-        format!("{}/stdout.log", config_dir),
+    let config_dir = platform::get_config_dir_path();
+    let logs_dir = platform::get_logs_dir_path();
+    let log_files: Vec<PathBuf> = vec![
+        logs_dir.join("gateway.log"),
+        logs_dir.join("gateway.err.log"),
+        config_dir.join("stderr.log"),
+        config_dir.join("stdout.log"),
     ];
     
     let mut all_lines: Vec<String> = Vec::new();
     
     for log_file in &log_files {
-        if !std::path::Path::new(log_file).exists() {
+        if !log_file.exists() {
             continue;
         }
-        
-        // 使用 tail 高效读取最后 N 行
-        match Command::new("tail")
-            .args(["-n", &n.to_string(), log_file])
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                let content = String::from_utf8_lossy(&output.stdout);
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        all_lines.push(trimmed.to_string());
-                    }
+
+        if let Ok(lines) = file::read_last_lines(&log_file.display().to_string(), n as usize) {
+            for line in lines {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    all_lines.push(trimmed.to_string());
                 }
             }
-            _ => continue,
         }
     }
     
@@ -283,7 +289,8 @@ pub async fn get_logs(lines: Option<u32>) -> Result<Vec<String>, String> {
     all_lines.sort();
     
     // 去重并保留最后 N 行
-    all_lines.dedup();
+    let mut seen = HashSet::new();
+    all_lines.retain(|line| seen.insert(line.clone()));
     let total = all_lines.len();
     if total > n as usize {
         all_lines = all_lines.split_off(total - n as usize);

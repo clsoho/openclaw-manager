@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::process::{Command, Output};
 use std::io;
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// 获取扩展的 PATH 环境变量
 /// GUI 应用启动时可能没有继承用户 shell 的 PATH，需要手动添加常见路径
 pub fn get_extended_path() -> String {
-    let mut paths = Vec::new();
+    let mut paths = Vec::<String>::new();
     
     // 添加常见的可执行文件路径
     paths.push("/opt/homebrew/bin".to_string());  // Homebrew on Apple Silicon
@@ -75,7 +76,29 @@ pub fn get_extended_path() -> String {
         paths.push(current_path);
     }
     
-    paths.join(":")
+    let separator = if platform::is_windows() { ";" } else { ":" };
+    paths.join(separator)
+}
+
+fn get_gateway_token_from_env() -> String {
+    file::read_env_value(&platform::get_env_file_path(), "OPENCLAW_GATEWAY_TOKEN")
+        .filter(|token| !token.is_empty())
+        .unwrap_or_else(|| DEFAULT_GATEWAY_TOKEN.to_string())
+}
+
+fn apply_openclaw_env(cmd: &mut Command, user_env_vars: &HashMap<String, String>) {
+    for (key, value) in user_env_vars {
+        cmd.env(key, value);
+    }
+
+    let token = user_env_vars
+        .get("OPENCLAW_GATEWAY_TOKEN")
+        .filter(|token| !token.is_empty())
+        .cloned()
+        .unwrap_or_else(get_gateway_token_from_env);
+
+    cmd.env("PATH", get_extended_path());
+    cmd.env("OPENCLAW_GATEWAY_TOKEN", token);
 }
 
 /// 执行 Shell 命令（带扩展 PATH）
@@ -436,18 +459,19 @@ pub fn run_openclaw(args: &[&str]) -> Result<String, String> {
     
     debug!("[Shell] openclaw 路径: {}", openclaw_path);
     
-    // 获取扩展的 PATH，确保能找到 node
-    let extended_path = get_extended_path();
-    debug!("[Shell] 扩展 PATH: {}", extended_path);
+    debug!("[Shell] 扩展 PATH: {}", get_extended_path());
     
+    let user_env_vars = load_openclaw_env_vars();
+
     let output = if openclaw_path.ends_with(".cmd") {
         // Windows: .cmd 文件需要通过 cmd /c 执行
-        let mut cmd_args = vec!["/c", &openclaw_path];
-        cmd_args.extend(args);
+        let mut cmd_args = Vec::<OsString>::new();
+        cmd_args.push("/c".into());
+        cmd_args.push(openclaw_path.clone().into());
+        cmd_args.extend(args.iter().map(|arg| OsString::from(*arg)));
         let mut cmd = Command::new("cmd");
-        cmd.args(&cmd_args)
-            .env("OPENCLAW_GATEWAY_TOKEN", DEFAULT_GATEWAY_TOKEN)
-            .env("PATH", &extended_path);
+        cmd.args(&cmd_args);
+        apply_openclaw_env(&mut cmd, &user_env_vars);
         
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -455,9 +479,8 @@ pub fn run_openclaw(args: &[&str]) -> Result<String, String> {
         cmd.output()
     } else {
         let mut cmd = Command::new(&openclaw_path);
-        cmd.args(args)
-            .env("OPENCLAW_GATEWAY_TOKEN", DEFAULT_GATEWAY_TOKEN)
-            .env("PATH", &extended_path);
+        cmd.args(args);
+        apply_openclaw_env(&mut cmd, &user_env_vars);
         
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -503,13 +526,12 @@ fn load_openclaw_env_vars() -> HashMap<String, String> {
             }
             // 解析 export KEY=VALUE 或 KEY=VALUE 格式
             let line = line.strip_prefix("export ").unwrap_or(line);
-            if let Some((key, value)) = line.split_once('=') {
+            if let Some((key, _value)) = line.split_once('=') {
                 let key = key.trim();
                 // 去除值周围的引号
-                let value = value.trim()
-                    .trim_matches('"')
-                    .trim_matches('\'');
-                env_vars.insert(key.to_string(), value.to_string());
+                if let Some(value) = file::read_env_value(&env_path, key) {
+                    env_vars.insert(key.to_string(), value);
+                }
             }
         }
     }
@@ -540,9 +562,7 @@ pub fn spawn_openclaw_gateway() -> io::Result<()> {
         debug!("[Shell] - 环境变量: {}", key);
     }
     
-    // 获取扩展的 PATH，确保能找到 node
-    let extended_path = get_extended_path();
-    info!("[Shell] 扩展 PATH: {}", extended_path);
+    info!("[Shell] 扩展 PATH: {}", get_extended_path());
     
     // Windows 上 .cmd 文件需要通过 cmd /c 来执行
     // 设置环境变量 OPENCLAW_GATEWAY_TOKEN，这样所有子命令都能自动使用
@@ -558,27 +578,21 @@ pub fn spawn_openclaw_gateway() -> io::Result<()> {
         c
     };
     
-    // 注入用户的环境变量（如 ANTHROPIC_API_KEY, OPENAI_API_KEY 等）
-    for (key, value) in &user_env_vars {
-        cmd.env(key, value);
-    }
-    
-    // 设置 PATH 和 gateway token
-    cmd.env("PATH", &extended_path);
-    cmd.env("OPENCLAW_GATEWAY_TOKEN", DEFAULT_GATEWAY_TOKEN);
+    // 注入用户环境变量、扩展 PATH 和 gateway token。
+    apply_openclaw_env(&mut cmd, &user_env_vars);
     
     // Windows: 隐藏控制台窗口
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     
     // 将 stdout/stderr 重定向到日志文件，以便 get_logs 可以读取
-    let logs_dir = format!("{}/logs", platform::get_config_dir());
+    let logs_dir = platform::get_logs_dir_path();
     let _ = std::fs::create_dir_all(&logs_dir);
     
-    let stdout_log_path = format!("{}/gateway.log", logs_dir);
-    let stderr_log_path = format!("{}/gateway.err.log", logs_dir);
+    let stdout_log_path = logs_dir.join("gateway.log");
+    let stderr_log_path = logs_dir.join("gateway.err.log");
     
-    info!("[Shell] 日志输出到: {} / {}", stdout_log_path, stderr_log_path);
+    info!("[Shell] 日志输出到: {} / {}", stdout_log_path.display(), stderr_log_path.display());
     
     if let Ok(stdout_file) = std::fs::OpenOptions::new()
         .create(true).append(true).open(&stdout_log_path)
