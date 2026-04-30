@@ -156,19 +156,19 @@ jobs:
       # ── 构建 ─────────────────────────────────────────────
       - name: Build Tauri app (macOS Universal)
         if: matrix.platform == 'macos-latest'
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         with:
           args: --target universal-apple-darwin --bundles dmg,macos
 
       - name: Build Tauri app (Windows)
         if: matrix.platform == 'windows-latest'
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         with:
           args: --target x86_64-pc-windows-msvc --bundles nsis
 
       - name: Build Tauri app (Linux)
         if: startsWith(matrix.platform, 'ubuntu')
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         with:
           args: --target ${{ matrix.target }} --bundles deb,appimage
 
