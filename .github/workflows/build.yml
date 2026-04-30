@@ -158,7 +158,7 @@ jobs:
         if: matrix.platform == 'macos-latest'
         uses: tauri-apps/tauri-action@v0.6.2
         with:
-          args: --target universal-apple-darwin --bundles dmg,macos
+          args: --target universal-apple-darwin --bundles dmg,app
 
       - name: Build Tauri app (Windows)
         if: matrix.platform == 'windows-latest'
