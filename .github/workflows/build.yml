@@ -110,8 +110,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             rust_targets: x86_64-unknown-linux-gnu
             label: Linux-x86_64
-          # Linux ARM64
-          - platform: ubuntu-22.04-arm
+          # Linux ARM64 (Note: requires custom runner or large runner on GitHub)
+          - platform: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             rust_targets: aarch64-unknown-linux-gnu
             label: Linux-ARM64
@@ -234,13 +234,16 @@ jobs:
       - name: Get version tag
         id: tag
         run: |
+          # 增加一个从 package.json 实时读取的兜底逻辑，防止 version-bump 被跳过时 tag 为空
+          VERSION=$(node -p "require('./package.json').version")
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
             echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          else
-            # 从 version-bump job 获取 tag
+          elif [ -n "${{ needs.version-bump.outputs.new_tag }}" ]; then
             echo "tag=${{ needs.version-bump.outputs.new_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release
