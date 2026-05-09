@@ -449,4 +449,3 @@ pub struct AgentBinding {
     #[serde(rename = "accountId")]
     pub account_id: Option<String>,
 }
-

@@ -1,36 +1,35 @@
-﻿use crate::models::{
-    AIConfigOverview, ChannelConfig, ConfiguredModel, ConfiguredProvider,
-    ModelConfig, OfficialProvider, SuggestedModel,
+use crate::models::{
+    AIConfigOverview, ChannelConfig, ConfiguredModel, ConfiguredProvider, ModelConfig,
+    OfficialProvider, SuggestedModel,
 };
 use crate::utils::{file, platform, shell};
 use log::{debug, error, info, warn};
-use serde_json::{json, Value};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashMap;
-use tauri::Emitter;
 use tauri::command;
+use tauri::Emitter;
 
 /// 获取 openclaw.json 配置
 fn load_openclaw_config() -> Result<Value, String> {
     let config_path = platform::get_config_file_path();
-    
+
     if !file::file_exists(&config_path) {
         return Ok(json!({}));
     }
-    
-    let content =
-        file::read_file(&config_path).map_err(|e| format!("读取配置文件失败: {}", e))?;
-    
+
+    let content = file::read_file(&config_path).map_err(|e| format!("读取配置文件失败: {}", e))?;
+
     serde_json::from_str(&content).map_err(|e| format!("解析配置文件失败: {}", e))
 }
 
 /// 保存 openclaw.json 配置
 fn save_openclaw_config(config: &Value) -> Result<(), String> {
     let config_path = platform::get_config_file_path();
-    
+
     let content =
         serde_json::to_string_pretty(config).map_err(|e| format!("序列化配置失败: {}", e))?;
-    
+
     file::write_file(&config_path, &content).map_err(|e| format!("写入配置文件失败: {}", e))
 }
 
@@ -89,7 +88,7 @@ pub async fn save_env_value(key: String, value: String) -> Result<String, String
     info!("[保存环境变量] 保存环境变量: {}", key);
     let env_path = platform::get_env_file_path();
     debug!("[保存环境变量] 环境文件路径: {}", env_path);
-    
+
     match file::set_env_value(&env_path, &key, &value) {
         Ok(_) => {
             info!("[保存环境变量] ✓ 环境变量 {} 保存成功", key);
@@ -107,16 +106,17 @@ pub async fn save_env_value(key: String, value: String) -> Result<String, String
 /// 生成随机 token
 fn generate_token() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    
+
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    
+
     // 使用时间戳和随机数生成 token
     let random_part: u64 = (timestamp as u64) ^ 0x5DEECE66Du64;
-    format!("{:016x}{:016x}{:016x}", 
-        random_part, 
+    format!(
+        "{:016x}{:016x}{:016x}",
+        random_part,
         random_part.wrapping_mul(0x5DEECE66Du64),
         timestamp as u64
     )
@@ -126,9 +126,9 @@ fn generate_token() -> String {
 #[command]
 pub async fn get_or_create_gateway_token() -> Result<String, String> {
     info!("[Gateway Token] 获取或创建 Gateway Token...");
-    
+
     let mut config = load_openclaw_config()?;
-    
+
     // 检查是否已有 token
     if let Some(token) = config
         .pointer("/gateway/auth/token")
@@ -139,11 +139,11 @@ pub async fn get_or_create_gateway_token() -> Result<String, String> {
             return Ok(token.to_string());
         }
     }
-    
+
     // 生成新 token
     let new_token = generate_token();
     info!("[Gateway Token] 生成新 Token: {}...", &new_token[..8]);
-    
+
     // 确保路径存在
     if config.get("gateway").is_none() {
         config["gateway"] = json!({});
@@ -151,15 +151,15 @@ pub async fn get_or_create_gateway_token() -> Result<String, String> {
     if config["gateway"].get("auth").is_none() {
         config["gateway"]["auth"] = json!({});
     }
-    
+
     // 设置 token 和 mode
     config["gateway"]["auth"]["token"] = json!(new_token);
     config["gateway"]["auth"]["mode"] = json!("token");
     config["gateway"]["mode"] = json!("local");
-    
+
     // 保存配置
     save_openclaw_config(&config)?;
-    
+
     info!("[Gateway Token] ✓ Token 已保存到配置");
     Ok(new_token)
 }
@@ -168,10 +168,11 @@ pub async fn get_or_create_gateway_token() -> Result<String, String> {
 #[command]
 pub async fn get_dashboard_url() -> Result<String, String> {
     info!("[Dashboard URL] 获取 Dashboard URL...");
-    
+
     let token = get_or_create_gateway_token().await?;
-    let url = format!("http://localhost:18789?token={}", token);
-    
+    let port = shell::get_gateway_port();
+    let url = format!("http://localhost:{}?token={}", port, token);
+
     info!("[Dashboard URL] ✓ URL: {}...", &url[..50.min(url.len())]);
     Ok(url)
 }
@@ -333,16 +334,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/glm".to_string()),
             auth_type: "api_key".to_string(),
-            suggested_models: vec![
-                SuggestedModel {
-                    id: "glm-4".to_string(),
-                    name: "GLM-4".to_string(),
-                    description: Some("最新旗舰模型".to_string()),
-                    context_window: Some(128000),
-                    max_tokens: Some(8192),
-                    recommended: true,
-                },
-            ],
+            suggested_models: vec![SuggestedModel {
+                id: "glm-4".to_string(),
+                name: "GLM-4".to_string(),
+                description: Some("最新旗舰模型".to_string()),
+                context_window: Some(128000),
+                max_tokens: Some(8192),
+                recommended: true,
+            }],
         },
         OfficialProvider {
             id: "minimax".to_string(),
@@ -353,16 +352,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/minimax".to_string()),
             auth_type: "api_key".to_string(),
-            suggested_models: vec![
-                SuggestedModel {
-                    id: "minimax-m2.1".to_string(),
-                    name: "MiniMax M2.1".to_string(),
-                    description: Some("最新模型".to_string()),
-                    context_window: Some(200000),
-                    max_tokens: Some(8192),
-                    recommended: true,
-                },
-            ],
+            suggested_models: vec![SuggestedModel {
+                id: "minimax-m2.1".to_string(),
+                name: "MiniMax M2.1".to_string(),
+                description: Some("最新模型".to_string()),
+                context_window: Some(200000),
+                max_tokens: Some(8192),
+                recommended: true,
+            }],
         },
         OfficialProvider {
             id: "venice".to_string(),
@@ -373,16 +370,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/venice".to_string()),
             auth_type: "api_key".to_string(),
-            suggested_models: vec![
-                SuggestedModel {
-                    id: "llama-3.3-70b".to_string(),
-                    name: "Llama 3.3 70B".to_string(),
-                    description: Some("隐私优先推理".to_string()),
-                    context_window: Some(128000),
-                    max_tokens: Some(8192),
-                    recommended: true,
-                },
-            ],
+            suggested_models: vec![SuggestedModel {
+                id: "llama-3.3-70b".to_string(),
+                name: "Llama 3.3 70B".to_string(),
+                description: Some("隐私优先推理".to_string()),
+                context_window: Some(128000),
+                max_tokens: Some(8192),
+                recommended: true,
+            }],
         },
         OfficialProvider {
             id: "openrouter".to_string(),
@@ -393,16 +388,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             requires_api_key: true,
             docs_url: Some("https://docs.openclaw.ai/providers/openrouter".to_string()),
             auth_type: "api_key".to_string(),
-            suggested_models: vec![
-                SuggestedModel {
-                    id: "anthropic/claude-opus-4-5".to_string(),
-                    name: "Claude Opus 4.5".to_string(),
-                    description: Some("通过 OpenRouter 访问".to_string()),
-                    context_window: Some(200000),
-                    max_tokens: Some(8192),
-                    recommended: true,
-                },
-            ],
+            suggested_models: vec![SuggestedModel {
+                id: "anthropic/claude-opus-4-5".to_string(),
+                name: "Claude Opus 4.5".to_string(),
+                description: Some("通过 OpenRouter 访问".to_string()),
+                context_window: Some(200000),
+                max_tokens: Some(8192),
+                recommended: true,
+            }],
         },
         OfficialProvider {
             id: "ollama".to_string(),
@@ -413,16 +406,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             requires_api_key: false,
             docs_url: Some("https://docs.openclaw.ai/providers/ollama".to_string()),
             auth_type: "api_key".to_string(),
-            suggested_models: vec![
-                SuggestedModel {
-                    id: "llama3".to_string(),
-                    name: "Llama 3".to_string(),
-                    description: Some("本地运行".to_string()),
-                    context_window: Some(8192),
-                    max_tokens: Some(4096),
-                    recommended: true,
-                },
-            ],
+            suggested_models: vec![SuggestedModel {
+                id: "llama3".to_string(),
+                name: "Llama 3".to_string(),
+                description: Some("本地运行".to_string()),
+                context_window: Some(8192),
+                max_tokens: Some(4096),
+                recommended: true,
+            }],
         },
         OfficialProvider {
             id: "github-copilot".to_string(),
@@ -520,10 +511,7 @@ pub async fn github_copilot_start_auth() -> Result<DeviceFlowResponse, String> {
     let client = reqwest::Client::new();
     let res = client
         .post("https://github.com/login/device/code")
-        .form(&[
-            ("client_id", COPILOT_CLIENT_ID),
-            ("scope", "read:user"),
-        ])
+        .form(&[("client_id", COPILOT_CLIENT_ID), ("scope", "read:user")])
         .send()
         .await
         .map_err(|e| format!("请求设备码失败: {}", e))?;
@@ -535,23 +523,31 @@ pub async fn github_copilot_start_auth() -> Result<DeviceFlowResponse, String> {
     }
 
     // GitHub 返回的是 form-urlencoded 格式
-    let body = res.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
-    let params: HashMap<String, String> = serde_urlencoded::from_str(&body)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let body = res
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    let params: HashMap<String, String> =
+        serde_urlencoded::from_str(&body).map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let device_code = params.get("device_code")
+    let device_code = params
+        .get("device_code")
         .ok_or_else(|| "响应中缺少 device_code".to_string())?
         .clone();
-    let user_code = params.get("user_code")
+    let user_code = params
+        .get("user_code")
         .ok_or_else(|| "响应中缺少 user_code".to_string())?
         .clone();
-    let verification_uri = params.get("verification_uri")
+    let verification_uri = params
+        .get("verification_uri")
         .ok_or_else(|| "响应中缺少 verification_uri".to_string())?
         .clone();
-    let expires_in = params.get("expires_in")
+    let expires_in = params
+        .get("expires_in")
         .and_then(|v| v.parse().ok())
         .unwrap_or(900);
-    let interval = params.get("interval")
+    let interval = params
+        .get("interval")
         .and_then(|v| v.parse().ok())
         .unwrap_or(5);
 
@@ -568,7 +564,10 @@ pub async fn github_copilot_start_auth() -> Result<DeviceFlowResponse, String> {
 
 /// 轮询 GitHub Copilot 认证状态
 #[command]
-pub async fn github_copilot_poll_token(device_code: String, interval: u32) -> Result<CopilotAuthResult, String> {
+pub async fn github_copilot_poll_token(
+    device_code: String,
+    interval: u32,
+) -> Result<CopilotAuthResult, String> {
     info!("[GitHub Copilot] 轮询 Token...");
 
     let client = reqwest::Client::new();
@@ -589,8 +588,8 @@ pub async fn github_copilot_poll_token(device_code: String, interval: u32) -> Re
             .map_err(|e| format!("轮询失败: {}", e))?;
 
         let body = res.text().await.unwrap_or_default();
-        let params: HashMap<String, String> = serde_urlencoded::from_str(&body)
-            .map_err(|e| format!("解析轮询响应失败: {}", e))?;
+        let params: HashMap<String, String> =
+            serde_urlencoded::from_str(&body).map_err(|e| format!("解析轮询响应失败: {}", e))?;
 
         // 检查是否有错误
         if let Some(err) = params.get("error") {
@@ -671,7 +670,10 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     info!("[AI 配置] 配置文件路径: {}", config_path);
 
     let config = load_openclaw_config()?;
-    debug!("[AI 配置] 配置内容: {}", serde_json::to_string_pretty(&config).unwrap_or_default());
+    debug!(
+        "[AI 配置] 配置内容: {}",
+        serde_json::to_string_pretty(&config).unwrap_or_default()
+    );
 
     // 解析主模型和 fallback 模型（支持单个 fallback 字符串或 fallbacks 数组）
     let primary_model = config
@@ -686,9 +688,17 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     // 为兼容性，同时读取这两种，并优先使用 fallbacks 数组
     let fallback_models: Vec<String> = {
         // 优先读取 fallbacks 数组
-        if let Some(arr) = config.pointer("/agents/defaults/model/fallbacks").and_then(|v| v.as_array()) {
-            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
-        } else if let Some(s) = config.pointer("/agents/defaults/model/fallback").and_then(|v| v.as_str()) {
+        if let Some(arr) = config
+            .pointer("/agents/defaults/model/fallbacks")
+            .and_then(|v| v.as_array())
+        {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        } else if let Some(s) = config
+            .pointer("/agents/defaults/model/fallback")
+            .and_then(|v| v.as_str())
+        {
             // 兼容旧格式单个字符串
             vec![s.to_string()]
         } else {
@@ -697,7 +707,10 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     };
     // 取第一个 fallback 用于前端单显示（保持现有 UI 不变）
     let fallback_model = fallback_models.first().cloned();
-    info!("[AI 配置] 备用模型列表: {:?}, 使用第一个: {:?}", fallback_models, fallback_model);
+    info!(
+        "[AI 配置] 备用模型列表: {:?}, 使用第一个: {:?}",
+        fallback_models, fallback_model
+    );
 
     // 解析可用模型列表
     let available_models: Vec<String> = config
@@ -711,14 +724,17 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     let mut configured_providers: Vec<ConfiguredProvider> = Vec::new();
 
     let providers_value = config.pointer("/models/providers");
-    info!("[AI 配置] providers 节点存在: {}", providers_value.is_some());
+    info!(
+        "[AI 配置] providers 节点存在: {}",
+        providers_value.is_some()
+    );
 
     if let Some(providers) = providers_value.and_then(|v| v.as_object()) {
         info!("[AI 配置] 找到 {} 个 Provider", providers.len());
-        
+
         for (provider_name, provider_config) in providers {
             info!("[AI 配置] 解析 Provider: {}", provider_name);
-            
+
             let base_url = provider_config
                 .get("baseUrl")
                 .and_then(|v| v.as_str())
@@ -740,8 +756,12 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
 
             // 解析模型列表
             let models_array = provider_config.get("models").and_then(|v| v.as_array());
-            info!("[AI 配置] Provider {} 的 models 数组: {:?}", provider_name, models_array.map(|a| a.len()));
-            
+            info!(
+                "[AI 配置] Provider {} 的 models 数组: {:?}",
+                provider_name,
+                models_array.map(|a| a.len())
+            );
+
             let models: Vec<ConfiguredModel> = models_array
                 .map(|arr| {
                     arr.iter()
@@ -757,13 +777,19 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
                             // 支持多 fallback：检查该模型是否在 fallback_models 列表中
                             let is_fallback = fallback_models.iter().any(|fb| fb == &full_id);
 
-                            info!("[AI 配置] 解析模型: {} (is_primary: {}, is_fallback: {})", full_id, is_primary, is_fallback);
+                            info!(
+                                "[AI 配置] 解析模型: {} (is_primary: {}, is_fallback: {})",
+                                full_id, is_primary, is_fallback
+                            );
 
                             Some(ConfiguredModel {
                                 full_id,
                                 id,
                                 name,
-                                api_type: m.get("api").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                api_type: m
+                                    .get("api")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string()),
                                 context_window: m
                                     .get("contextWindow")
                                     .and_then(|v| v.as_u64())
@@ -780,7 +806,11 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
                 })
                 .unwrap_or_default();
 
-            info!("[AI 配置] Provider {} 解析完成: {} 个模型", provider_name, models.len());
+            info!(
+                "[AI 配置] Provider {} 解析完成: {} 个模型",
+                provider_name,
+                models.len()
+            );
 
             configured_providers.push(ConfiguredProvider {
                 name: provider_name.clone(),
@@ -1138,14 +1168,14 @@ pub async fn get_ai_providers() -> Result<Vec<crate::models::AIProviderOption>, 
 #[command]
 pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
     info!("[渠道配置] 获取渠道配置列表...");
-    
+
     let config = load_openclaw_config()?;
     let channels_obj = config.get("channels").cloned().unwrap_or(json!({}));
     let env_path = platform::get_env_file_path();
     debug!("[渠道配置] 环境文件路径: {}", env_path);
-    
+
     let mut channels = Vec::new();
-    
+
     // 支持的渠道类型列表及其测试字段
     let channel_types = vec![
         ("telegram", "telegram", vec!["userId"]),
@@ -1159,15 +1189,15 @@ pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
         ("dingtalk", "dingtalk", vec![]),
         ("qqbot", "qqbot", vec![]),
     ];
-    
+
     for (channel_id, channel_type, test_fields) in channel_types {
         let channel_config = channels_obj.get(channel_id);
-        
+
         let enabled = channel_config
             .and_then(|c| c.get("enabled"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        
+
         // 将渠道配置转换为 HashMap
         let mut config_map: HashMap<String, Value> = if let Some(cfg) = channel_config {
             if let Some(obj) = cfg.as_object() {
@@ -1181,7 +1211,7 @@ pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
         } else {
             HashMap::new()
         };
-        
+
         // 从 env 文件读取测试字段
         for field in test_fields {
             let env_key = format!(
@@ -1193,10 +1223,10 @@ pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
                 config_map.insert(field.to_string(), json!(value));
             }
         }
-        
+
         // 判断是否已配置（有任何非空配置项）
         let has_config = !config_map.is_empty() || enabled;
-        
+
         channels.push(ChannelConfig {
             id: channel_id.to_string(),
             channel_type: channel_type.to_string(),
@@ -1204,7 +1234,7 @@ pub async fn get_channels_config() -> Result<Vec<ChannelConfig>, String> {
             config: config_map,
         });
     }
-    
+
     info!("[渠道配置] ✓ 返回 {} 个渠道配置", channels.len());
     for ch in &channels {
         debug!("[渠道配置] - {}: enabled={}", ch.id, ch.enabled);
@@ -1219,16 +1249,16 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
         "[保存渠道配置] 保存渠道配置: {} ({})",
         channel.id, channel.channel_type
     );
-    
+
     let mut config = load_openclaw_config()?;
     let env_path = platform::get_env_file_path();
     debug!("[保存渠道配置] 环境文件路径: {}", env_path);
-    
+
     // 确保 channels 对象存在
     if config.get("channels").is_none() {
         config["channels"] = json!({});
     }
-    
+
     // 确保 plugins 对象存在
     if config.get("plugins").is_none() {
         config["plugins"] = json!({
@@ -1242,15 +1272,15 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
     if config["plugins"].get("entries").is_none() {
         config["plugins"]["entries"] = json!({});
     }
-    
+
     // 这些字段只用于测试，不保存到 openclaw.json，而是保存到 env 文件
     let test_only_fields = vec!["userId", "testChatId", "testChannelId"];
-    
+
     // 构建渠道配置
     let mut channel_obj = json!({
         "enabled": true
     });
-    
+
     // 添加渠道特定配置
     for (key, value) in &channel.config {
         if test_only_fields.contains(&key.as_str()) {
@@ -1268,10 +1298,10 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
             channel_obj[key] = value.clone();
         }
     }
-    
+
     // 更新 channels 配置
     config["channels"][&channel.id] = channel_obj;
-    
+
     // 更新 plugins.allow 数组 - 确保渠道在白名单中
     if let Some(allow_arr) = config["plugins"]["allow"].as_array_mut() {
         let channel_id_val = json!(&channel.id);
@@ -1279,20 +1309,17 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
             allow_arr.push(channel_id_val);
         }
     }
-    
+
     // 更新 plugins.entries - 确保插件已启用
     config["plugins"]["entries"][&channel.id] = json!({
         "enabled": true
     });
-    
+
     // 保存配置
     info!("[保存渠道配置] 写入配置文件...");
     match save_openclaw_config(&config) {
         Ok(_) => {
-            info!(
-                "[保存渠道配置] ✓ {} 配置保存成功",
-                channel.channel_type
-            );
+            info!("[保存渠道配置] ✓ {} 配置保存成功", channel.channel_type);
             Ok(format!("{} 配置已保存", channel.channel_type))
         }
         Err(e) => {
@@ -1306,28 +1333,34 @@ pub async fn save_channel_config(channel: ChannelConfig) -> Result<String, Strin
 #[command]
 pub async fn clear_channel_config(channel_id: String) -> Result<String, String> {
     info!("[清空渠道配置] 清空渠道配置: {}", channel_id);
-    
+
     let mut config = load_openclaw_config()?;
     let env_path = platform::get_env_file_path();
-    
+
     // 从 channels 对象中删除该渠道
     if let Some(channels) = config.get_mut("channels").and_then(|v| v.as_object_mut()) {
         channels.remove(&channel_id);
         info!("[清空渠道配置] 已从 channels 中删除: {}", channel_id);
     }
-    
+
     // 从 plugins.allow 数组中删除
-    if let Some(allow_arr) = config.pointer_mut("/plugins/allow").and_then(|v| v.as_array_mut()) {
+    if let Some(allow_arr) = config
+        .pointer_mut("/plugins/allow")
+        .and_then(|v| v.as_array_mut())
+    {
         allow_arr.retain(|v| v.as_str() != Some(&channel_id));
         info!("[清空渠道配置] 已从 plugins.allow 中删除: {}", channel_id);
     }
-    
+
     // 从 plugins.entries 中删除
-    if let Some(entries) = config.pointer_mut("/plugins/entries").and_then(|v| v.as_object_mut()) {
+    if let Some(entries) = config
+        .pointer_mut("/plugins/entries")
+        .and_then(|v| v.as_object_mut())
+    {
         entries.remove(&channel_id);
         info!("[清空渠道配置] 已从 plugins.entries 中删除: {}", channel_id);
     }
-    
+
     // 清除相关的环境变量
     let env_prefixes = vec![
         format!("OPENCLAW_{}_USERID", channel_id.to_uppercase()),
@@ -1337,7 +1370,7 @@ pub async fn clear_channel_config(channel_id: String) -> Result<String, String> 
     for env_key in env_prefixes {
         let _ = file::remove_env_value(&env_path, &env_key);
     }
-    
+
     // 保存配置
     match save_openclaw_config(&config) {
         Ok(_) => {
@@ -1365,32 +1398,38 @@ pub struct FeishuPluginStatus {
 #[command]
 pub async fn check_feishu_plugin() -> Result<FeishuPluginStatus, String> {
     info!("[飞书插件] 检查飞书插件安装状态...");
-    
+
     // 执行 openclaw plugins list 命令
     match shell::run_openclaw(&["plugins", "list"]) {
         Ok(output) => {
             debug!("[飞书插件] plugins list 输出: {}", output);
-            
+
             // 查找包含 feishu 的行（不区分大小写）
             let lines: Vec<&str> = output.lines().collect();
-            let feishu_line = lines.iter().find(|line| {
-                line.to_lowercase().contains("feishu")
-            });
-            
+            let feishu_line = lines
+                .iter()
+                .find(|line| line.to_lowercase().contains("feishu"));
+
             if let Some(line) = feishu_line {
                 info!("[飞书插件] ✓ 飞书插件已安装: {}", line);
-                
+
                 // 尝试解析版本号（通常格式为 "name@version" 或 "name version"）
                 let version = if line.contains('@') {
                     line.split('@').last().map(|s| s.trim().to_string())
                 } else {
                     // 尝试匹配版本号模式 (如 0.1.2)
                     let parts: Vec<&str> = line.split_whitespace().collect();
-                    parts.iter()
-                        .find(|p| p.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+                    parts
+                        .iter()
+                        .find(|p| {
+                            p.chars()
+                                .next()
+                                .map(|c| c.is_ascii_digit())
+                                .unwrap_or(false)
+                        })
                         .map(|s| s.to_string())
                 };
-                
+
                 Ok(FeishuPluginStatus {
                     installed: true,
                     version,
@@ -1421,26 +1460,32 @@ pub async fn check_feishu_plugin() -> Result<FeishuPluginStatus, String> {
 #[command]
 pub async fn install_feishu_plugin() -> Result<String, String> {
     info!("[飞书插件] 开始安装飞书插件...");
-    
+
     // 先检查是否已安装
     let status = check_feishu_plugin().await?;
     if status.installed {
         info!("[飞书插件] 飞书插件已安装，跳过");
-        return Ok(format!("飞书插件已安装: {}", status.plugin_name.unwrap_or_default()));
+        return Ok(format!(
+            "飞书插件已安装: {}",
+            status.plugin_name.unwrap_or_default()
+        ));
     }
-    
+
     // 安装飞书插件
     // 注意：使用 @m1heng-clawd/feishu 包名
     info!("[飞书插件] 执行 openclaw plugins install @m1heng-clawd/feishu ...");
     match shell::run_openclaw(&["plugins", "install", "@m1heng-clawd/feishu"]) {
         Ok(output) => {
             info!("[飞书插件] 安装输出: {}", output);
-            
+
             // 验证安装结果
             let verify_status = check_feishu_plugin().await?;
             if verify_status.installed {
                 info!("[飞书插件] ✓ 飞书插件安装成功");
-                Ok(format!("飞书插件安装成功: {}", verify_status.plugin_name.unwrap_or_default()))
+                Ok(format!(
+                    "飞书插件安装成功: {}",
+                    verify_status.plugin_name.unwrap_or_default()
+                ))
             } else {
                 warn!("[飞书插件] 安装命令执行成功但插件未找到");
                 Err("安装命令执行成功但插件未找到，请检查 openclaw 版本".to_string())
@@ -1448,7 +1493,10 @@ pub async fn install_feishu_plugin() -> Result<String, String> {
         }
         Err(e) => {
             error!("[飞书插件] ✗ 安装失败: {}", e);
-            Err(format!("安装飞书插件失败: {}\n\n请手动执行: openclaw plugins install @m1heng-clawd/feishu", e))
+            Err(format!(
+                "安装飞书插件失败: {}\n\n请手动执行: openclaw plugins install @m1heng-clawd/feishu",
+                e
+            ))
         }
     }
 }
@@ -1467,31 +1515,37 @@ pub struct QQBotPluginStatus {
 #[command]
 pub async fn check_qqbot_plugin() -> Result<QQBotPluginStatus, String> {
     info!("[QQ Bot 插件] 检查 QQ Bot 插件安装状态...");
-    
+
     // 执行 openclaw plugins list 命令
     match shell::run_openclaw(&["plugins", "list"]) {
         Ok(output) => {
             debug!("[QQ Bot 插件] plugins list 输出: {}", output);
-            
+
             // 查找包含 qqbot 的行（不区分大小写）
             let lines: Vec<&str> = output.lines().collect();
-            let qqbot_line = lines.iter().find(|line| {
-                line.to_lowercase().contains("qqbot")
-            });
-            
+            let qqbot_line = lines
+                .iter()
+                .find(|line| line.to_lowercase().contains("qqbot"));
+
             if let Some(line) = qqbot_line {
                 info!("[QQ Bot 插件] ✓ QQ Bot 插件已安装: {}", line);
-                
+
                 // 尝试解析版本号
                 let version = if line.contains('@') {
                     line.split('@').last().map(|s| s.trim().to_string())
                 } else {
                     let parts: Vec<&str> = line.split_whitespace().collect();
-                    parts.iter()
-                        .find(|p| p.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+                    parts
+                        .iter()
+                        .find(|p| {
+                            p.chars()
+                                .next()
+                                .map(|c| c.is_ascii_digit())
+                                .unwrap_or(false)
+                        })
                         .map(|s| s.to_string())
                 };
-                
+
                 Ok(QQBotPluginStatus {
                     installed: true,
                     version,
@@ -1521,25 +1575,31 @@ pub async fn check_qqbot_plugin() -> Result<QQBotPluginStatus, String> {
 #[command]
 pub async fn install_qqbot_plugin() -> Result<String, String> {
     info!("[QQ Bot 插件] 开始安装 QQ Bot 插件...");
-    
+
     // 先检查是否已安装
     let status = check_qqbot_plugin().await?;
     if status.installed {
         info!("[QQ Bot 插件] QQ Bot 插件已安装，跳过");
-        return Ok(format!("QQ Bot 插件已安装: {}", status.plugin_name.unwrap_or_default()));
+        return Ok(format!(
+            "QQ Bot 插件已安装: {}",
+            status.plugin_name.unwrap_or_default()
+        ));
     }
-    
+
     // 安装 QQ Bot 插件
     info!("[QQ Bot 插件] 执行 openclaw plugins install @sliverp/qqbot@latest ...");
     match shell::run_openclaw(&["plugins", "install", "@sliverp/qqbot@latest"]) {
         Ok(output) => {
             info!("[QQ Bot 插件] 安装输出: {}", output);
-            
+
             // 验证安装结果
             let verify_status = check_qqbot_plugin().await?;
             if verify_status.installed {
                 info!("[QQ Bot 插件] ✓ QQ Bot 插件安装成功");
-                Ok(format!("QQ Bot 插件安装成功: {}", verify_status.plugin_name.unwrap_or_default()))
+                Ok(format!(
+                    "QQ Bot 插件安装成功: {}",
+                    verify_status.plugin_name.unwrap_or_default()
+                ))
             } else {
                 warn!("[QQ Bot 插件] 安装命令执行成功但插件未找到");
                 Err("安装命令执行成功但插件未找到，请检查 openclaw 版本".to_string())
@@ -1554,7 +1614,7 @@ pub async fn install_qqbot_plugin() -> Result<String, String> {
 
 // ============ 技能库管理 ============
 
-use crate::models::{SkillDefinition, SkillConfigField};
+use crate::models::{SkillConfigField, SkillDefinition};
 
 /// 获取内置技能预设清单
 fn get_preset_skills() -> Vec<SkillDefinition> {
@@ -1572,13 +1632,16 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             clawhub_slug: None,
             installed: true, // 内置默认已安装
             enabled: false,
-            config_fields: vec![
-                SkillConfigField {
-                    key: "apiKey".into(), label: "Brave API Key".into(), field_type: "password".into(),
-                    placeholder: Some("BSA...".into()), options: None, required: true,
-                    default_value: None, help_text: Some("从 brave.com/search/api 获取".into()),
-                },
-            ],
+            config_fields: vec![SkillConfigField {
+                key: "apiKey".into(),
+                label: "Brave API Key".into(),
+                field_type: "password".into(),
+                placeholder: Some("BSA...".into()),
+                options: None,
+                required: true,
+                default_value: None,
+                help_text: Some("从 brave.com/search/api 获取".into()),
+            }],
             config_values: HashMap::new(),
             docs_url: Some("https://docs.openclaw.ai/tools/brave-search".into()),
             category: Some("搜索".into()),
@@ -1595,13 +1658,16 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             clawhub_slug: None,
             installed: true,
             enabled: false,
-            config_fields: vec![
-                SkillConfigField {
-                    key: "apiKey".into(), label: "Perplexity API Key".into(), field_type: "password".into(),
-                    placeholder: Some("pplx-...".into()), options: None, required: true,
-                    default_value: None, help_text: Some("从 perplexity.ai 获取 API Key".into()),
-                },
-            ],
+            config_fields: vec![SkillConfigField {
+                key: "apiKey".into(),
+                label: "Perplexity API Key".into(),
+                field_type: "password".into(),
+                placeholder: Some("pplx-...".into()),
+                options: None,
+                required: true,
+                default_value: None,
+                help_text: Some("从 perplexity.ai 获取 API Key".into()),
+            }],
             config_values: HashMap::new(),
             docs_url: Some("https://docs.openclaw.ai/tools/perplexity-sonar".into()),
             category: Some("搜索".into()),
@@ -1652,18 +1718,20 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             clawhub_slug: None,
             installed: true,
             enabled: false,
-            config_fields: vec![
-                SkillConfigField {
-                    key: "apiKey".into(), label: "Firecrawl API Key".into(), field_type: "password".into(),
-                    placeholder: Some("fc-...".into()), options: None, required: true,
-                    default_value: None, help_text: Some("从 firecrawl.dev 获取".into()),
-                },
-            ],
+            config_fields: vec![SkillConfigField {
+                key: "apiKey".into(),
+                label: "Firecrawl API Key".into(),
+                field_type: "password".into(),
+                placeholder: Some("fc-...".into()),
+                options: None,
+                required: true,
+                default_value: None,
+                help_text: Some("从 firecrawl.dev 获取".into()),
+            }],
             config_values: HashMap::new(),
             docs_url: Some("https://docs.openclaw.ai/tools/firecrawl".into()),
             category: Some("工具".into()),
         },
-
         // ---- 官方插件 (official) ----
         SkillDefinition {
             id: "voice-call".into(),
@@ -1696,14 +1764,24 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             enabled: false,
             config_fields: vec![
                 SkillConfigField {
-                    key: "appId".into(), label: "App ID".into(), field_type: "text".into(),
-                    placeholder: Some("Teams Bot App ID".into()), options: None, required: true,
-                    default_value: None, help_text: None,
+                    key: "appId".into(),
+                    label: "App ID".into(),
+                    field_type: "text".into(),
+                    placeholder: Some("Teams Bot App ID".into()),
+                    options: None,
+                    required: true,
+                    default_value: None,
+                    help_text: None,
                 },
                 SkillConfigField {
-                    key: "appPassword".into(), label: "App Password".into(), field_type: "password".into(),
-                    placeholder: Some("Teams Bot App Password".into()), options: None, required: true,
-                    default_value: None, help_text: None,
+                    key: "appPassword".into(),
+                    label: "App Password".into(),
+                    field_type: "password".into(),
+                    placeholder: Some("Teams Bot App Password".into()),
+                    options: None,
+                    required: true,
+                    default_value: None,
+                    help_text: None,
                 },
             ],
             config_values: HashMap::new(),
@@ -1724,14 +1802,24 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             enabled: false,
             config_fields: vec![
                 SkillConfigField {
-                    key: "homeserverUrl".into(), label: "Homeserver URL".into(), field_type: "text".into(),
-                    placeholder: Some("https://matrix.org".into()), options: None, required: true,
-                    default_value: None, help_text: None,
+                    key: "homeserverUrl".into(),
+                    label: "Homeserver URL".into(),
+                    field_type: "text".into(),
+                    placeholder: Some("https://matrix.org".into()),
+                    options: None,
+                    required: true,
+                    default_value: None,
+                    help_text: None,
                 },
                 SkillConfigField {
-                    key: "accessToken".into(), label: "Access Token".into(), field_type: "password".into(),
-                    placeholder: Some("Matrix Access Token".into()), options: None, required: true,
-                    default_value: None, help_text: None,
+                    key: "accessToken".into(),
+                    label: "Access Token".into(),
+                    field_type: "password".into(),
+                    placeholder: Some("Matrix Access Token".into()),
+                    options: None,
+                    required: true,
+                    default_value: None,
+                    help_text: None,
                 },
             ],
             config_values: HashMap::new(),
@@ -1755,7 +1843,6 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             docs_url: None,
             category: Some("通讯".into()),
         },
-
         // ---- 社区技能 (community) ----
         SkillDefinition {
             id: "github".into(),
@@ -1769,13 +1856,16 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             clawhub_slug: Some("github".into()),
             installed: false,
             enabled: false,
-            config_fields: vec![
-                SkillConfigField {
-                    key: "token".into(), label: "GitHub Token".into(), field_type: "password".into(),
-                    placeholder: Some("ghp_...".into()), options: None, required: true,
-                    default_value: None, help_text: Some("Personal Access Token".into()),
-                },
-            ],
+            config_fields: vec![SkillConfigField {
+                key: "token".into(),
+                label: "GitHub Token".into(),
+                field_type: "password".into(),
+                placeholder: Some("ghp_...".into()),
+                options: None,
+                required: true,
+                default_value: None,
+                help_text: Some("Personal Access Token".into()),
+            }],
             config_values: HashMap::new(),
             docs_url: Some("https://clawhub.ai/skills/github".into()),
             category: Some("开发".into()),
@@ -1826,13 +1916,16 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             clawhub_slug: Some("linear".into()),
             installed: false,
             enabled: false,
-            config_fields: vec![
-                SkillConfigField {
-                    key: "apiKey".into(), label: "Linear API Key".into(), field_type: "password".into(),
-                    placeholder: Some("lin_api_...".into()), options: None, required: true,
-                    default_value: None, help_text: None,
-                },
-            ],
+            config_fields: vec![SkillConfigField {
+                key: "apiKey".into(),
+                label: "Linear API Key".into(),
+                field_type: "password".into(),
+                placeholder: Some("lin_api_...".into()),
+                options: None,
+                required: true,
+                default_value: None,
+                help_text: None,
+            }],
             config_values: HashMap::new(),
             docs_url: Some("https://clawhub.ai/skills/linear".into()),
             category: Some("生产力".into()),
@@ -1849,13 +1942,16 @@ fn get_preset_skills() -> Vec<SkillDefinition> {
             clawhub_slug: Some("obsidian".into()),
             installed: false,
             enabled: false,
-            config_fields: vec![
-                SkillConfigField {
-                    key: "vaultPath".into(), label: "Vault 路径".into(), field_type: "text".into(),
-                    placeholder: Some("/path/to/vault".into()), options: None, required: true,
-                    default_value: None, help_text: Some("Obsidian Vault 文件夹路径".into()),
-                },
-            ],
+            config_fields: vec![SkillConfigField {
+                key: "vaultPath".into(),
+                label: "Vault 路径".into(),
+                field_type: "text".into(),
+                placeholder: Some("/path/to/vault".into()),
+                options: None,
+                required: true,
+                default_value: None,
+                help_text: Some("Obsidian Vault 文件夹路径".into()),
+            }],
             config_values: HashMap::new(),
             docs_url: Some("https://clawhub.ai/skills/obsidian".into()),
             category: Some("生产力".into()),
@@ -1886,23 +1982,28 @@ pub async fn get_skills_list() -> Result<Vec<SkillDefinition>, String> {
     info!("[技能库] 获取技能列表...");
 
     let config = load_openclaw_config()?;
-    let plugins_entries = config.pointer("/plugins/entries")
+    let plugins_entries = config
+        .pointer("/plugins/entries")
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default();
-    let plugins_allow: Vec<String> = config.pointer("/plugins/allow")
+    let plugins_allow: Vec<String> = config
+        .pointer("/plugins/allow")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     // 获取已安装的插件列表（通过 openclaw plugins list）
     let installed_plugins: Vec<String> = match shell::run_openclaw(&["plugins", "list"]) {
-        Ok(output) => {
-            output.lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect()
-        }
+        Ok(output) => output
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
         Err(_) => Vec::new(),
     };
 
@@ -1912,7 +2013,10 @@ pub async fn get_skills_list() -> Result<Vec<SkillDefinition>, String> {
     for skill in &mut skills {
         // 检查 plugins.entries 中是否有对应条目
         if let Some(entry) = plugins_entries.get(&skill.id) {
-            let is_enabled = entry.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_enabled = entry
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             skill.enabled = is_enabled;
 
             // 读取保存的配置值
@@ -1946,8 +2050,15 @@ pub async fn get_skills_list() -> Result<Vec<SkillDefinition>, String> {
 
 /// 安装技能
 #[command]
-pub async fn install_skill(skill_id: String, package_name: Option<String>, clawhub_slug: Option<String>) -> Result<String, String> {
-    info!("[技能库] 安装技能: {} (pkg: {:?}, slug: {:?})", skill_id, package_name, clawhub_slug);
+pub async fn install_skill(
+    skill_id: String,
+    package_name: Option<String>,
+    clawhub_slug: Option<String>,
+) -> Result<String, String> {
+    info!(
+        "[技能库] 安装技能: {} (pkg: {:?}, slug: {:?})",
+        skill_id, package_name, clawhub_slug
+    );
 
     // 优先使用 npm 包名安装
     if let Some(pkg) = &package_name {
@@ -1989,7 +2100,10 @@ pub async fn install_skill(skill_id: String, package_name: Option<String>, clawh
 
 /// 卸载技能
 #[command]
-pub async fn uninstall_skill(skill_id: String, package_name: Option<String>) -> Result<String, String> {
+pub async fn uninstall_skill(
+    skill_id: String,
+    package_name: Option<String>,
+) -> Result<String, String> {
     info!("[技能库] 卸载技能: {} (pkg: {:?})", skill_id, package_name);
 
     let pkg = package_name.as_deref().unwrap_or(&skill_id);
@@ -2012,7 +2126,11 @@ pub async fn uninstall_skill(skill_id: String, package_name: Option<String>) -> 
 
 /// 保存技能配置
 #[command]
-pub async fn save_skill_config(skill_id: String, enabled: bool, config: HashMap<String, Value>) -> Result<String, String> {
+pub async fn save_skill_config(
+    skill_id: String,
+    enabled: bool,
+    config: HashMap<String, Value>,
+) -> Result<String, String> {
     info!("[技能库] 保存技能配置: {} (enabled: {})", skill_id, enabled);
 
     let mut full_config = load_openclaw_config()?;
@@ -2050,8 +2168,17 @@ pub async fn save_skill_config(skill_id: String, enabled: bool, config: HashMap<
     // 对于有环境变量需求的配置，保存到 env 文件
     let env_path = platform::get_env_file_path();
     for (k, v) in &config {
-        if k.ends_with("apiKey") || k.ends_with("Key") || k.ends_with("Token") || k.ends_with("token") || k.ends_with("Secret") {
-            let env_key = format!("OPENCLAW_SKILL_{}_{}", skill_id.to_uppercase().replace('-', "_"), k.to_uppercase());
+        if k.ends_with("apiKey")
+            || k.ends_with("Key")
+            || k.ends_with("Token")
+            || k.ends_with("token")
+            || k.ends_with("Secret")
+        {
+            let env_key = format!(
+                "OPENCLAW_SKILL_{}_{}",
+                skill_id.to_uppercase().replace('-', "_"),
+                k.to_uppercase()
+            );
             if let Some(val_str) = v.as_str() {
                 let _ = file::set_env_value(&env_path, &env_key, val_str);
             }
@@ -2066,7 +2193,10 @@ pub async fn save_skill_config(skill_id: String, enabled: bool, config: HashMap<
 /// 安装自定义技能（npm 包名 或 本地 zip/文件夹路径）
 #[command]
 pub async fn install_custom_skill(source: String, source_type: String) -> Result<String, String> {
-    info!("[技能库] 安装自定义技能: {} (类型: {})", source, source_type);
+    info!(
+        "[技能库] 安装自定义技能: {} (类型: {})",
+        source, source_type
+    );
 
     match source_type.as_str() {
         "npm" => {
@@ -2096,9 +2226,7 @@ pub async fn install_custom_skill(source: String, source_type: String) -> Result
                 }
             }
         }
-        _ => {
-            Err(format!("不支持的安装类型: {}", source_type))
-        }
+        _ => Err(format!("不支持的安装类型: {}", source_type)),
     }
 }
 
@@ -2141,66 +2269,140 @@ fn update_skill_plugin_config(skill_id: &str, add: bool) -> Result<(), String> {
 
 // ============ Agent（虚拟员工）管理 ============
 
-use crate::models::{AgentConfig, AgentBinding};
+use crate::models::{AgentBinding, AgentConfig};
 
 /// 从 openclaw.json 的 agents.list[] 解析单个 agent 为 AgentConfig
 fn parse_agent_entry(entry: &Value, all_bindings: &[Value]) -> AgentConfig {
-    let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("main").to_string();
-    let is_default = entry.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
+    let id = entry
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main")
+        .to_string();
+    let is_default = entry
+        .get("default")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let identity = entry.get("identity").cloned().unwrap_or(json!({}));
-    let name = identity.get("name").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
-    let emoji = identity.get("emoji").and_then(|v| v.as_str()).unwrap_or("🤖").to_string();
-    let theme = identity.get("theme").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let name = identity
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&id)
+        .to_string();
+    let emoji = identity
+        .get("emoji")
+        .and_then(|v| v.as_str())
+        .unwrap_or("🤖")
+        .to_string();
+    let theme = identity
+        .get("theme")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    let workspace = entry.get("workspace").and_then(|v| v.as_str())
-        .unwrap_or("~/.openclaw/workspace").to_string();
-    let agent_dir = entry.get("agentDir").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let workspace = entry
+        .get("workspace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("~/.openclaw/workspace")
+        .to_string();
+    let agent_dir = entry
+        .get("agentDir")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     let model = match entry.get("model") {
         Some(Value::String(s)) => Some(s.clone()),
-        Some(Value::Object(obj)) => obj.get("primary").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        Some(Value::Object(obj)) => obj
+            .get("primary")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         _ => None,
     };
 
     let sandbox = entry.get("sandbox").cloned().unwrap_or(json!({}));
-    let sandbox_mode = sandbox.get("mode").and_then(|v| v.as_str()).unwrap_or("off").to_string();
+    let sandbox_mode = sandbox
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("off")
+        .to_string();
 
     let tools = entry.get("tools").cloned().unwrap_or(json!({}));
-    let tools_profile = tools.get("profile").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let tools_allow = tools.get("allow").and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+    let tools_profile = tools
+        .get("profile")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let tools_allow = tools
+        .get("allow")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
-    let tools_deny = tools.get("deny").and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+    let tools_deny = tools
+        .get("deny")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let group_chat = entry.get("groupChat").cloned().unwrap_or(json!({}));
-    let mention_patterns = group_chat.get("mentionPatterns").and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+    let mention_patterns = group_chat
+        .get("mentionPatterns")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let subagents = entry.get("subagents").cloned().unwrap_or(json!({}));
-    let subagent_allow = subagents.get("allowAgents").and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+    let subagent_allow = subagents
+        .get("allowAgents")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     // 从全局 bindings 中提取属于该 agent 的绑定
-    let bindings: Vec<AgentBinding> = all_bindings.iter()
+    let bindings: Vec<AgentBinding> = all_bindings
+        .iter()
         .filter(|b| b.get("agentId").and_then(|v| v.as_str()) == Some(&id))
         .filter_map(|b| {
             let m = b.get("match")?;
             Some(AgentBinding {
                 channel: m.get("channel").and_then(|v| v.as_str())?.to_string(),
-                account_id: m.get("accountId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                account_id: m
+                    .get("accountId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             })
         })
         .collect();
 
     AgentConfig {
-        id, name, emoji, theme, workspace, agent_dir, model, is_default,
-        sandbox_mode, tools_profile, tools_allow, tools_deny, bindings,
-        mention_patterns, subagent_allow,
+        id,
+        name,
+        emoji,
+        theme,
+        workspace,
+        agent_dir,
+        model,
+        is_default,
+        sandbox_mode,
+        tools_profile,
+        tools_allow,
+        tools_deny,
+        bindings,
+        mention_patterns,
+        subagent_allow,
     }
 }
 
@@ -2235,7 +2437,9 @@ fn agent_to_json(agent: &AgentConfig) -> Value {
     }
 
     // tools
-    let has_tools = agent.tools_profile.is_some() || !agent.tools_allow.is_empty() || !agent.tools_deny.is_empty();
+    let has_tools = agent.tools_profile.is_some()
+        || !agent.tools_allow.is_empty()
+        || !agent.tools_deny.is_empty();
     if has_tools {
         let mut tools = json!({});
         if let Some(ref profile) = agent.tools_profile {
@@ -2271,7 +2475,8 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
     let config = load_openclaw_config()?;
 
     // 读取 agents.list — 兼容数组和单对象两种存储格式
-    let agents_list: Vec<Value> = config.pointer("/agents/list")
+    let agents_list: Vec<Value> = config
+        .pointer("/agents/list")
         .and_then(|v| {
             if let Some(arr) = v.as_array() {
                 Some(arr.clone())
@@ -2284,33 +2489,50 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
         .unwrap_or_default();
 
     // 读取顶层 bindings 数组
-    let all_bindings = config.get("bindings")
+    let all_bindings = config
+        .get("bindings")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
 
-    let mut agents: Vec<AgentConfig> = agents_list.iter()
+    let mut agents: Vec<AgentConfig> = agents_list
+        .iter()
         .map(|entry| parse_agent_entry(entry, &all_bindings))
         .collect();
 
     // 如果 Gateway 可用，从 /v1/agents 拉取完整 Agent 列表（包含 workspace agents）
     if let Ok(token) = get_or_create_gateway_token().await {
         let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:18789/v1/agents?token={}", token);
+        let port = shell::get_gateway_port();
+        let url = format!("http://127.0.0.1:{}/v1/agents?token={}", port, token);
         if let Ok(resp) = client.get(&url).send().await {
             if resp.status().is_success() {
                 if let Ok(remote_agents) = resp.json::<Vec<Value>>().await {
                     for item in remote_agents {
                         let id_opt = item.get("id").and_then(|v| v.as_str());
                         let id = id_opt.unwrap_or_default().to_string();
-                        if id.is_empty() { continue; }
-                        if agents.iter().any(|a| a.id == id) { continue; }
-                        let name = item.get("name").and_then(|v| v.as_str())
-                            .unwrap_or(id_opt.unwrap_or("Unnamed")).to_string();
-                        let emoji = item.get("emoji").and_then(|v| v.as_str())
-                            .unwrap_or("🤖").to_string();
-                        let is_default = item.get("isDefault").and_then(|v| v.as_bool()).unwrap_or(false);
-                        let workspace = item.get("workspace")
+                        if id.is_empty() {
+                            continue;
+                        }
+                        if agents.iter().any(|a| a.id == id) {
+                            continue;
+                        }
+                        let name = item
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(id_opt.unwrap_or("Unnamed"))
+                            .to_string();
+                        let emoji = item
+                            .get("emoji")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("🤖")
+                            .to_string();
+                        let is_default = item
+                            .get("isDefault")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let workspace = item
+                            .get("workspace")
                             .and_then(|v| v.as_str())
                             .unwrap_or("~/.openclaw/workspace")
                             .to_string();
@@ -2346,7 +2568,8 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
 
     // 如果仍然没有任何 Agent，生成一个默认的
     if agents.is_empty() {
-        let default_workspace = config.pointer("/agents/defaults/workspace")
+        let default_workspace = config
+            .pointer("/agents/defaults/workspace")
             .and_then(|v| v.as_str())
             .unwrap_or("~/.openclaw/workspace")
             .to_string();
@@ -2384,12 +2607,14 @@ pub async fn get_agents_list() -> Result<Vec<AgentConfig>, String> {
 
 /// 构建隐含的 main Agent 配置（从 agents.defaults 中获取）
 fn get_main_agent_config(config: &Value, _all_bindings: &[Value]) -> AgentConfig {
-    let default_workspace = config.pointer("/agents/defaults/workspace")
+    let default_workspace = config
+        .pointer("/agents/defaults/workspace")
         .and_then(|v| v.as_str())
         .unwrap_or("~/.openclaw/workspace")
         .to_string();
 
-    let model = config.pointer("/agents/defaults/model/primary")
+    let model = config
+        .pointer("/agents/defaults/model/primary")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
@@ -2434,7 +2659,10 @@ pub async fn save_agent(agent: AgentConfig) -> Result<String, String> {
 
     // 更新或添加到 agents.list
     if let Some(list) = config["agents"]["list"].as_array_mut() {
-        if let Some(pos) = list.iter().position(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent.id)) {
+        if let Some(pos) = list
+            .iter()
+            .position(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent.id))
+        {
             list[pos] = agent_json;
         } else {
             list.push(agent_json);
@@ -2457,8 +2685,12 @@ pub async fn save_agent(agent: AgentConfig) -> Result<String, String> {
     }
 
     // 确保工作空间目录存在
-    let workspace_path = agent.workspace.replace("~", &dirs::home_dir()
-        .map(|h| h.display().to_string()).unwrap_or_default());
+    let workspace_path = agent.workspace.replace(
+        "~",
+        &dirs::home_dir()
+            .map(|h| h.display().to_string())
+            .unwrap_or_default(),
+    );
     let _ = std::fs::create_dir_all(&workspace_path);
 
     save_openclaw_config(&config)?;
@@ -2478,7 +2710,10 @@ pub async fn delete_agent(agent_id: String) -> Result<String, String> {
     let mut config = load_openclaw_config()?;
 
     // 从 agents.list 移除
-    if let Some(list) = config.pointer_mut("/agents/list").and_then(|v| v.as_array_mut()) {
+    if let Some(list) = config
+        .pointer_mut("/agents/list")
+        .and_then(|v| v.as_array_mut())
+    {
         list.retain(|a| a.get("id").and_then(|v| v.as_str()) != Some(&agent_id));
     }
 
@@ -2522,7 +2757,10 @@ pub async fn get_chat_endpoint_status() -> Result<ChatEndpointStatus, String> {
         .map(|output| output.to_lowercase().contains("running"))
         .unwrap_or(false);
 
-    info!("[聊天端点] enabled={}, has_token={}, running={}", enabled, has_token, gateway_running);
+    info!(
+        "[聊天端点] enabled={}, has_token={}, running={}",
+        enabled, has_token, gateway_running
+    );
 
     Ok(ChatEndpointStatus {
         enabled,
@@ -2547,7 +2785,10 @@ pub async fn enable_chat_completions() -> Result<String, String> {
     if config["gateway"]["http"].get("endpoints").is_none() {
         config["gateway"]["http"]["endpoints"] = json!({});
     }
-    if config["gateway"]["http"]["endpoints"].get("chatCompletions").is_none() {
+    if config["gateway"]["http"]["endpoints"]
+        .get("chatCompletions")
+        .is_none()
+    {
         config["gateway"]["http"]["endpoints"]["chatCompletions"] = json!({});
     }
 
@@ -2566,12 +2807,17 @@ pub async fn fetch_gateway_models(_token: String) -> Result<Vec<String>, String>
     let config = load_openclaw_config()?;
 
     // 从 agents.defaults.models 中获取所有已注册的模型
-    let models: Vec<String> = config.pointer("/agents/defaults/models")
+    let models: Vec<String> = config
+        .pointer("/agents/defaults/models")
         .and_then(|v| v.as_object())
         .map(|obj| obj.keys().cloned().collect())
         .unwrap_or_default();
 
-    info!("[Gateway API] ✓ 获取到 {} 个 LLM 模型: {:?}", models.len(), models);
+    info!(
+        "[Gateway API] ✓ 获取到 {} 个 LLM 模型: {:?}",
+        models.len(),
+        models
+    );
     Ok(models)
 }
 
@@ -2584,7 +2830,10 @@ pub async fn check_gateway_running(token: String) -> Result<bool, String> {
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
     match client
-        .get("http://127.0.0.1:18789/v1/models")
+        .get(format!(
+            "http://127.0.0.1:{}/v1/models",
+            shell::get_gateway_port()
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -2599,50 +2848,69 @@ pub async fn check_gateway_running(token: String) -> Result<bool, String> {
 /// chat.history 参数：{sessionKey, limit}
 /// 返回：{messages: [...]}
 #[command]
-pub async fn fetch_chat_history(agent_id: String, token: String, limit: Option<u32>) -> Result<Vec<serde_json::Value>, String> {
-    use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as TsMessage};
-    use futures::StreamExt;
+pub async fn fetch_chat_history(
+    agent_id: String,
+    token: String,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
     use futures::SinkExt;
+    use futures::StreamExt;
     use serde_json::json;
-    
+    use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as TsMessage};
+
     let limit = limit.unwrap_or(50);
     info!("[聊天历史] 获取历史: agent={}, limit={}", agent_id, limit);
-    
-    let ws_url = format!("ws://127.0.0.1:18789/ws?token={}", token);
-    let (ws_stream, _) = connect_async(&ws_url).await
+
+    let ws_url = format!(
+        "ws://127.0.0.1:{}/ws?token={}",
+        shell::get_gateway_port(),
+        token
+    );
+    let (ws_stream, _) = connect_async(&ws_url)
+        .await
         .map_err(|e| format!("连接 Gateway WebSocket 失败: {}", e))?;
-    
+
     let (mut ws_send, mut ws_recv) = ws_stream.split();
-    
+
     // 先发送 connect 握手
-    let session_key = if agent_id == "main" { "main" } else { &agent_id };
+    let session_key = if agent_id == "main" {
+        "main"
+    } else {
+        &agent_id
+    };
     let connect_msg = json!({
         "type": "connect",
         "sessionKey": session_key,
     });
     info!("[聊天历史] 发送 connect 握手: {}", connect_msg);
-    ws_send.send(TsMessage::Text(connect_msg.to_string().into())).await
+    ws_send
+        .send(TsMessage::Text(connect_msg.to_string().into()))
+        .await
         .map_err(|e| format!("发送 connect 失败: {}", e))?;
-    
+
     // 等待 connect 响应（不阻塞流程，如果失败后面会继续尝试）
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        async {
-            while let Some(msg_result) = ws_recv.next().await {
-                if let Ok(TsMessage::Text(text)) = msg_result {
-                    if let Ok(resp) = serde_json::from_str::<Value>(&text) {
-                        if resp.get("type").and_then(|v| v.as_str()) == Some("connected") {
-                            info!("[聊天历史] connect 成功");
-                            return;
-                        }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while let Some(msg_result) = ws_recv.next().await {
+            if let Ok(TsMessage::Text(text)) = msg_result {
+                if let Ok(resp) = serde_json::from_str::<Value>(&text) {
+                    if resp.get("type").and_then(|v| v.as_str()) == Some("connected") {
+                        info!("[聊天历史] connect 成功");
+                        return;
                     }
                 }
             }
         }
-    ).await;
-    
+    })
+    .await;
+
     // 发送 chat.history 请求
-    let req_id = format!("hist-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    let req_id = format!(
+        "hist-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
     let req = json!({
         "type": "req",
         "id": &req_id,
@@ -2653,31 +2921,34 @@ pub async fn fetch_chat_history(agent_id: String, token: String, limit: Option<u
         }
     });
     info!("[聊天历史] 发送请求: {}", req);
-    
-    ws_send.send(TsMessage::Text(req.to_string().into())).await
+
+    ws_send
+        .send(TsMessage::Text(req.to_string().into()))
+        .await
         .map_err(|e| format!("发送请求失败: {}", e))?;
-    
+
     // 读取响应（最多 10 秒）
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        async {
-            while let Some(msg_result) = ws_recv.next().await {
-                if let Ok(TsMessage::Text(text)) = msg_result {
-                    debug!("[聊天历史] 收到 WS 消息: {}", text.chars().take(500).collect::<String>());
-                    if let Ok(resp) = serde_json::from_str::<Value>(&text) {
-                        // 匹配响应协议: {type: "res", id, ok, payload}
-                        if resp.get("id").and_then(|v| v.as_str()) == Some(req_id.as_str()) {
-                            return Some(resp);
-                        }
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Some(msg_result) = ws_recv.next().await {
+            if let Ok(TsMessage::Text(text)) = msg_result {
+                debug!(
+                    "[聊天历史] 收到 WS 消息: {}",
+                    text.chars().take(500).collect::<String>()
+                );
+                if let Ok(resp) = serde_json::from_str::<Value>(&text) {
+                    // 匹配响应协议: {type: "res", id, ok, payload}
+                    if resp.get("id").and_then(|v| v.as_str()) == Some(req_id.as_str()) {
+                        return Some(resp);
                     }
                 }
             }
-            None
         }
-    ).await;
-    
+        None
+    })
+    .await;
+
     _ = ws_send.close().await;
-    
+
     match result {
         Ok(Some(resp)) => {
             info!("[聊天历史] 收到响应: {}", resp);
@@ -2695,7 +2966,8 @@ pub async fn fetch_chat_history(agent_id: String, token: String, limit: Option<u
                     if let Some(messages) = obj.get("messages").and_then(|v| v.as_array()) {
                         info!("[聊天历史] 获取到 {} 条消息", messages.len());
                         Ok(messages.clone())
-                    } else if let Some(messages) = obj.get("transcript").and_then(|v| v.as_array()) {
+                    } else if let Some(messages) = obj.get("transcript").and_then(|v| v.as_array())
+                    {
                         info!("[聊天历史] 从 transcript 获取到 {} 条消息", messages.len());
                         Ok(messages.clone())
                     } else {
@@ -2745,7 +3017,10 @@ pub async fn send_chat_stream(
     // Gateway /v1/chat/completions 只接受 "openclaw" 或 "openclaw/<agentId>"
     // 无论前端选了哪个 LLM 模型，Gateway 内部会根据 agent 配置自动路由
     let model_param = format!("openclaw/{}", agent_id);
-    info!("[Chat Stream] 发起流式请求: agent={}, gateway_model={}, id={}", agent_id, model_param, request_id);
+    info!(
+        "[Chat Stream] 发起流式请求: agent={}, gateway_model={}, id={}",
+        agent_id, model_param, request_id
+    );
 
     let body = json!({
         "model": model_param,
@@ -2753,7 +3028,11 @@ pub async fn send_chat_stream(
         "messages": messages,
     });
 
-    let url = format!("http://127.0.0.1:18789/v1/chat/completions?token={}", token);
+    let url = format!(
+        "http://127.0.0.1:{}/v1/chat/completions?token={}",
+        shell::get_gateway_port(),
+        token
+    );
     let resp = client
         .post(&url)
         .header("Content-Type", "application/json")
@@ -2775,19 +3054,23 @@ pub async fn send_chat_stream(
         // 不是 SSE — 读取完整 body 判断错误
         let err_text = resp.text().await.unwrap_or_default();
         let error_msg = if let Ok(j) = serde_json::from_str::<Value>(&err_text) {
-            j.pointer("/error/message").and_then(|v| v.as_str())
+            j.pointer("/error/message")
+                .and_then(|v| v.as_str())
                 .or_else(|| j.pointer("/content").and_then(|v| v.as_str()))
                 .unwrap_or("请求失败")
                 .to_string()
         } else {
             err_text
         };
-        let _ = app.emit("chat-stream", serde_json::json!({
-            "request_id": &request_id,
-            "content": "",
-            "done": true,
-            "error": format!("HTTP {} {}", status, error_msg),
-        }));
+        let _ = app.emit(
+            "chat-stream",
+            serde_json::json!({
+                "request_id": &request_id,
+                "content": "",
+                "done": true,
+                "error": format!("HTTP {} {}", status, error_msg),
+            }),
+        );
         return Err(format!("Gateway HTTP {}: {}", status, error_msg));
     }
 
@@ -2811,12 +3094,15 @@ pub async fn send_chat_stream(
                 }
                 let data = &trimmed[6..];
                 if data == "[DONE]" {
-                    let _ = app.emit("chat-stream", serde_json::json!({
-                        "request_id": &request_id,
-                        "content": &accumulated,
-                        "done": true,
-                        "error": serde_json::Value::Null,
-                    }));
+                    let _ = app.emit(
+                        "chat-stream",
+                        serde_json::json!({
+                            "request_id": &request_id,
+                            "content": &accumulated,
+                            "done": true,
+                            "error": serde_json::Value::Null,
+                        }),
+                    );
                     info!("[Chat Stream] 完成: id={}", request_id);
                     return Ok("done".to_string());
                 }
@@ -2824,39 +3110,63 @@ pub async fn send_chat_stream(
                     // 检测错误响应
                     if let Some(err) = parsed.pointer("/error/message").and_then(|v| v.as_str()) {
                         warn!("[Chat Stream] SSE 错误: {}", err);
-                        let _ = app.emit("chat-stream", serde_json::json!({
-                            "request_id": &request_id,
-                            "content": "",
-                            "done": true,
-                            "error": err,
-                        }));
-                        return Ok("error".to_string());
-                    }
-                    // Qwen 模型会先返回 reasoning_content（思考过程），再返回 content（实际回复）
-                    let delta = parsed.pointer("/choices/0/delta/content")
-                        .and_then(|v| v.as_str())
-                        .or_else(|| parsed.pointer("/choices/0/delta/reasoning_content").and_then(|v| v.as_str()))
-                        .unwrap_or("");
-                    debug!("[Chat Stream] SSE delta: content='{}' (accumulated len={})", delta, accumulated.len());
-                    if !delta.is_empty() {
-                        accumulated.push_str(delta);
-                        let _ = app.emit("chat-stream", serde_json::json!({
-                            "request_id": &request_id,
-                            "content": &accumulated,
-                            "done": false,
-                            "error": serde_json::Value::Null,
-                        }));
-                    }
-                    // 检查非流式响应中的 content 字段是否为错误信息
-                    if let Some(content) = parsed.pointer("/choices/0/message/content").and_then(|v| v.as_str()) {
-                        if content.starts_with("400 ") || content.starts_with("500 ") || content.contains("not a valid model") {
-                            warn!("[Chat Stream] 检测到错误响应内容: {}", content);
-                            let _ = app.emit("chat-stream", serde_json::json!({
+                        let _ = app.emit(
+                            "chat-stream",
+                            serde_json::json!({
                                 "request_id": &request_id,
                                 "content": "",
                                 "done": true,
-                                "error": content,
-                            }));
+                                "error": err,
+                            }),
+                        );
+                        return Ok("error".to_string());
+                    }
+                    // Qwen 模型会先返回 reasoning_content（思考过程），再返回 content（实际回复）
+                    let delta = parsed
+                        .pointer("/choices/0/delta/content")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            parsed
+                                .pointer("/choices/0/delta/reasoning_content")
+                                .and_then(|v| v.as_str())
+                        })
+                        .unwrap_or("");
+                    debug!(
+                        "[Chat Stream] SSE delta: content='{}' (accumulated len={})",
+                        delta,
+                        accumulated.len()
+                    );
+                    if !delta.is_empty() {
+                        accumulated.push_str(delta);
+                        let _ = app.emit(
+                            "chat-stream",
+                            serde_json::json!({
+                                "request_id": &request_id,
+                                "content": &accumulated,
+                                "done": false,
+                                "error": serde_json::Value::Null,
+                            }),
+                        );
+                    }
+                    // 检查非流式响应中的 content 字段是否为错误信息
+                    if let Some(content) = parsed
+                        .pointer("/choices/0/message/content")
+                        .and_then(|v| v.as_str())
+                    {
+                        if content.starts_with("400 ")
+                            || content.starts_with("500 ")
+                            || content.contains("not a valid model")
+                        {
+                            warn!("[Chat Stream] 检测到错误响应内容: {}", content);
+                            let _ = app.emit(
+                                "chat-stream",
+                                serde_json::json!({
+                                    "request_id": &request_id,
+                                    "content": "",
+                                    "done": true,
+                                    "error": content,
+                                }),
+                            );
                             return Ok("error".to_string());
                         }
                     }
@@ -2866,12 +3176,15 @@ pub async fn send_chat_stream(
     }
 
     // 流结束但没有 [DONE]
-    let _ = app.emit("chat-stream", serde_json::json!({
-        "request_id": &request_id,
-        "content": accumulated,
-        "done": true,
-        "error": Some("流异常结束（未收到 [DONE]）"),
-    }));
+    let _ = app.emit(
+        "chat-stream",
+        serde_json::json!({
+            "request_id": &request_id,
+            "content": accumulated,
+            "done": true,
+            "error": Some("流异常结束（未收到 [DONE]）"),
+        }),
+    );
     Ok("partial".to_string())
 }
 
@@ -2937,8 +3250,7 @@ pub async fn get_chat_token() -> Result<String, String> {
 pub async fn start_gateway() -> Result<String, String> {
     info!("[Gateway] 通过 CLI 启动...");
 
-    shell::run_openclaw(&["gateway", "restart"])
-        .map_err(|e| format!("无法启动 Gateway: {}", e))?;
+    shell::run_openclaw(&["gateway", "restart"]).map_err(|e| format!("无法启动 Gateway: {}", e))?;
 
     // 等待 Gateway 就绪
     for _attempt in 0..20 {
@@ -2947,7 +3259,8 @@ pub async fn start_gateway() -> Result<String, String> {
             .timeout(std::time::Duration::from_millis(2000))
             .build()
             .map_err(|e| format!("HTTP 客户端失败: {}", e))?;
-        if client.get("http://127.0.0.1:18789/").send().await.is_ok() {
+        let url = format!("http://127.0.0.1:{}/", shell::get_gateway_port());
+        if client.get(url).send().await.is_ok() {
             info!("[Gateway] 已就绪");
             return Ok("OK Gateway 启动成功".to_string());
         }

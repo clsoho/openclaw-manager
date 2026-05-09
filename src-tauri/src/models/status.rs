@@ -22,7 +22,7 @@ impl Default for ServiceStatus {
         Self {
             running: false,
             pid: None,
-            port: 18789,
+            port: crate::utils::shell::DEFAULT_GATEWAY_PORT,
             uptime_seconds: None,
             memory_mb: None,
             cpu_percent: None,
