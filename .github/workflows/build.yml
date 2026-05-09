@@ -246,7 +246,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          target_commitish: ${{ steps.tag.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true
