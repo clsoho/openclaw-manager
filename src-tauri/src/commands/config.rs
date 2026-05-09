@@ -113,6 +113,66 @@ fn copilot_model_display(model_id: &str) -> (String, Option<u32>, Option<u32>) {
     }
 }
 
+fn ensure_agents_defaults_models(config: &mut Value) {
+    if config.get("agents").is_none() {
+        config["agents"] = json!({});
+    }
+    if config["agents"].get("defaults").is_none() {
+        config["agents"]["defaults"] = json!({});
+    }
+    if config["agents"]["defaults"].get("models").is_none() {
+        config["agents"]["defaults"]["models"] = json!({});
+    }
+}
+
+fn migrate_legacy_github_copilot_provider(config: &mut Value) -> Result<bool, String> {
+    let legacy_provider = config
+        .pointer(&format!("/models/providers/{}", GITHUB_COPILOT_PROVIDER_ID))
+        .cloned();
+
+    let Some(provider_config) = legacy_provider else {
+        return Ok(false);
+    };
+
+    if let Some(token) = provider_config.get("apiKey").and_then(|v| v.as_str()) {
+        if !token.is_empty() && !has_github_copilot_auth_profile() {
+            save_github_copilot_token(token)?;
+        }
+    }
+
+    let legacy_models: Vec<String> = provider_config
+        .get("models")
+        .and_then(|v| v.as_array())
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("id").and_then(|id| id.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    ensure_agents_defaults_models(config);
+    for model_id in legacy_models {
+        let full_id = format!("{}/{}", GITHUB_COPILOT_PROVIDER_ID, model_id);
+        config["agents"]["defaults"]["models"][&full_id] = json!({});
+    }
+
+    if let Some(providers) = config
+        .pointer_mut("/models/providers")
+        .and_then(|v| v.as_object_mut())
+    {
+        providers.remove(GITHUB_COPILOT_PROVIDER_ID);
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if config.get("meta").is_none() {
+        config["meta"] = json!({});
+    }
+    config["meta"]["lastTouchedAt"] = json!(now);
+
+    Ok(true)
+}
+
 /// 获取完整配置
 #[command]
 pub async fn get_config() -> Result<Value, String> {
@@ -753,7 +813,11 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     let config_path = platform::get_config_file_path();
     info!("[AI 配置] 配置文件路径: {}", config_path);
 
-    let config = load_openclaw_config()?;
+    let mut config = load_openclaw_config()?;
+    if migrate_legacy_github_copilot_provider(&mut config)? {
+        save_openclaw_config(&config)?;
+        info!("[AI 配置] 已迁移旧版 GitHub Copilot Provider 配置");
+    }
     debug!(
         "[AI 配置] 配置内容: {}",
         serde_json::to_string_pretty(&config).unwrap_or_default()
@@ -989,16 +1053,7 @@ pub async fn save_provider(
             info!("[保存 Provider] GitHub Copilot Token 已写入 auth profile store");
         }
 
-        if config.get("agents").is_none() {
-            config["agents"] = json!({});
-        }
-        if config["agents"].get("defaults").is_none() {
-            config["agents"]["defaults"] = json!({});
-        }
-        if config["agents"]["defaults"].get("models").is_none() {
-            config["agents"]["defaults"]["models"] = json!({});
-        }
-
+        ensure_agents_defaults_models(&mut config);
         for model in &models {
             let full_id = format!("{}/{}", GITHUB_COPILOT_PROVIDER_ID, model.id);
             config["agents"]["defaults"]["models"][&full_id] = json!({});
