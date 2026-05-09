@@ -61,6 +61,19 @@ pub fn get_config_file_path() -> String {
         .to_string()
 }
 
+/// 获取 OpenClaw 主 Agent 的模型认证 Profile 文件路径
+pub fn get_auth_profiles_file_path() -> String {
+    env::var("OPENCLAW_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| get_config_dir_path())
+        .join("agents")
+        .join("main")
+        .join("agent")
+        .join("auth-profiles.json")
+        .display()
+        .to_string()
+}
+
 /// 获取日志文件路径
 pub fn get_log_file_path() -> String {
     get_logs_dir_path()

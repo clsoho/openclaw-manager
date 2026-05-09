@@ -270,7 +270,7 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
   const handleSave = async (forceOverride: boolean = false) => {
     setFormError(null);
 
-    if (!providerName || !baseUrl || selectedModels.length === 0) {
+    if (!providerName || (!isDeviceFlow && !baseUrl) || selectedModels.length === 0) {
       setFormError(t('aiConfig.formError'));
       return;
     }
@@ -292,7 +292,7 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
         return {
           id: modelId,
           name: suggested?.name || existingModel?.name || modelId,
-          api: apiType,
+          api: isDeviceFlow ? null : apiType,
           input: ['text', 'image'],
           context_window: suggested?.context_window || existingModel?.context_window || 200000,
           max_tokens: suggested?.max_tokens || existingModel?.max_tokens || 8192,
@@ -303,7 +303,7 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
 
       await invoke('save_provider', {
         providerName,
-        baseUrl,
+        baseUrl: isDeviceFlow ? '' : baseUrl,
         apiKey: apiKey || null,
         apiType,
         models,
@@ -440,16 +440,18 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
                 </div>
 
                 {/* API 地址 */}
-                <div>
-                  <label className="block text-sm text-content-secondary mb-2">API 地址</label>
-                  <input
-                    type="text"
-                    value={baseUrl}
-                    onChange={e => { setFormError(null); setBaseUrl(e.target.value); }}
-                    placeholder="https://api.example.com/v1"
-                    className="input-base"
-                  />
-                </div>
+                {!isDeviceFlow && (
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-2">API 地址</label>
+                    <input
+                      type="text"
+                      value={baseUrl}
+                      onChange={e => { setFormError(null); setBaseUrl(e.target.value); }}
+                      placeholder="https://api.example.com/v1"
+                      className="input-base"
+                    />
+                  </div>
+                )}
 
               {/* API Key / Device Flow */}
                 <div>
@@ -524,7 +526,7 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
                           <CheckCircle size={20} className="text-green-400" />
                           <div>
                             <p className="text-green-400 font-medium">认证成功！</p>
-                            <p className="text-xs text-green-300 mt-0.5">Token 已自动填入</p>
+                            <p className="text-xs text-green-300 mt-0.5">Token 将保存到 OpenClaw auth profile store</p>
                           </div>
                         </div>
                       )}
@@ -609,17 +611,19 @@ function ProviderDialog({ officialProviders, onClose, onSave, editingProvider }:
                 </div>
 
                 {/* API 类型 */}
-                <div>
-                  <label className="block text-sm text-content-secondary mb-2">API 类型</label>
-                  <select
-                    value={apiType}
-                    onChange={e => setApiType(e.target.value)}
-                    className="input-base"
-                  >
-                    <option value="openai-completions">{t('aiConfig.openaiCompat')}</option>
-                    <option value="anthropic-messages">{t('aiConfig.anthropicCompat')}</option>
-                  </select>
-                </div>
+                {!isDeviceFlow && (
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-2">API 类型</label>
+                    <select
+                      value={apiType}
+                      onChange={e => setApiType(e.target.value)}
+                      className="input-base"
+                    >
+                      <option value="openai-completions">{t('aiConfig.openaiCompat')}</option>
+                      <option value="anthropic-messages">{t('aiConfig.anthropicCompat')}</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* 模型选择 */}
               <div>

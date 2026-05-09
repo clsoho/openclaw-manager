@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use tauri::command;
 use tauri::Emitter;
 
+const GITHUB_COPILOT_PROVIDER_ID: &str = "github-copilot";
+
 /// 获取 openclaw.json 配置
 fn load_openclaw_config() -> Result<Value, String> {
     let config_path = platform::get_config_file_path();
@@ -31,6 +33,84 @@ fn save_openclaw_config(config: &Value) -> Result<(), String> {
         serde_json::to_string_pretty(config).map_err(|e| format!("序列化配置失败: {}", e))?;
 
     file::write_file(&config_path, &content).map_err(|e| format!("写入配置文件失败: {}", e))
+}
+
+fn load_auth_profiles() -> Result<Value, String> {
+    let path = platform::get_auth_profiles_file_path();
+    if !file::file_exists(&path) {
+        return Ok(json!({ "version": 1, "profiles": {} }));
+    }
+
+    let content = file::read_file(&path).map_err(|e| format!("读取认证配置失败: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("解析认证配置失败: {}", e))
+}
+
+fn save_auth_profiles(auth: &Value) -> Result<(), String> {
+    let path = platform::get_auth_profiles_file_path();
+    let content =
+        serde_json::to_string_pretty(auth).map_err(|e| format!("序列化认证配置失败: {}", e))?;
+    file::write_file(&path, &content).map_err(|e| format!("写入认证配置失败: {}", e))
+}
+
+fn save_github_copilot_token(token: &str) -> Result<(), String> {
+    let mut auth = load_auth_profiles()?;
+    if auth.get("version").is_none() {
+        auth["version"] = json!(1);
+    }
+    if auth.get("profiles").and_then(|v| v.as_object()).is_none() {
+        auth["profiles"] = json!({});
+    }
+
+    auth["profiles"]["github-copilot:default"] = json!({
+        "type": "token",
+        "provider": GITHUB_COPILOT_PROVIDER_ID,
+        "token": token,
+    });
+
+    save_auth_profiles(&auth)
+}
+
+fn remove_github_copilot_token() -> Result<(), String> {
+    let mut auth = load_auth_profiles()?;
+    if let Some(profiles) = auth.get_mut("profiles").and_then(|v| v.as_object_mut()) {
+        profiles.remove("github-copilot:default");
+    }
+    save_auth_profiles(&auth)
+}
+
+fn has_github_copilot_auth_profile() -> bool {
+    load_auth_profiles()
+        .ok()
+        .and_then(|auth| {
+            auth.pointer("/profiles/github-copilot:default/provider")
+                .and_then(|v| v.as_str())
+                .map(|provider| provider == GITHUB_COPILOT_PROVIDER_ID)
+        })
+        .unwrap_or(false)
+}
+
+fn copilot_model_display(model_id: &str) -> (String, Option<u32>, Option<u32>) {
+    match model_id {
+        "claude-opus-4.7" => (
+            "Claude Opus 4.7 (Copilot)".to_string(),
+            Some(200000),
+            Some(32768),
+        ),
+        "claude-sonnet-4.5" => (
+            "Claude Sonnet 4.5 (Copilot)".to_string(),
+            Some(200000),
+            Some(16384),
+        ),
+        "gpt-5.5" => ("GPT-5.5 (Copilot)".to_string(), Some(400000), Some(32768)),
+        "gpt-5.4-mini" => (
+            "GPT-5.4 Mini (Copilot)".to_string(),
+            Some(400000),
+            Some(32768),
+        ),
+        "gpt-4.1" => ("GPT-4.1 (Copilot)".to_string(), Some(1047576), Some(32768)),
+        "gpt-4o" => ("GPT-4o (Copilot)".to_string(), Some(128000), Some(16384)),
+        other => (format!("{} (Copilot)", other), None, None),
+    }
 }
 
 /// 获取完整配置
@@ -416,43 +496,47 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             }],
         },
         OfficialProvider {
-            id: "github-copilot".to_string(),
+            id: GITHUB_COPILOT_PROVIDER_ID.to_string(),
             name: "GitHub Copilot".to_string(),
             icon: "🐙".to_string(),
-            default_base_url: Some("https://api.githubcopilot.com".to_string()),
-            api_type: "openai-completions".to_string(),
+            default_base_url: None,
+            api_type: "auto".to_string(),
             requires_api_key: true,
-            docs_url: Some("https://docs.github.com/en/copilot".to_string()),
+            docs_url: Some("https://docs.openclaw.ai/providers/github-copilot".to_string()),
             auth_type: "device_flow".to_string(),
             suggested_models: vec![
                 SuggestedModel {
-                    id: "gpt-4o".to_string(),
-                    name: "GPT-4o (Copilot)".to_string(),
-                    description: Some("OpenAI GPT-4o via Copilot".to_string()),
-                    context_window: Some(128000),
-                    max_tokens: Some(16384),
+                    id: "claude-opus-4.7".to_string(),
+                    name: "Claude Opus 4.7 (Copilot)".to_string(),
+                    description: Some(
+                        "Copilot 动态目录中的推荐模型，实际可用性取决于 GitHub 订阅".to_string(),
+                    ),
+                    context_window: Some(200000),
+                    max_tokens: Some(32768),
                     recommended: true,
                 },
                 SuggestedModel {
-                    id: "claude-sonnet-4-20250514".to_string(),
-                    name: "Claude Sonnet 4 (Copilot)".to_string(),
-                    description: Some("Anthropic Claude via Copilot".to_string()),
+                    id: "claude-sonnet-4.5".to_string(),
+                    name: "Claude Sonnet 4.5 (Copilot)".to_string(),
+                    description: Some(
+                        "OpenClaw 会自动使用 Anthropic Messages transport".to_string(),
+                    ),
                     context_window: Some(200000),
                     max_tokens: Some(16384),
                     recommended: true,
                 },
                 SuggestedModel {
-                    id: "o3-mini".to_string(),
-                    name: "o3-mini (Copilot)".to_string(),
-                    description: Some("OpenAI 推理模型".to_string()),
-                    context_window: Some(200000),
-                    max_tokens: Some(100000),
+                    id: "gpt-5.5".to_string(),
+                    name: "GPT-5.5 (Copilot)".to_string(),
+                    description: Some("Copilot GPT 系列，模型可用性取决于账户权限".to_string()),
+                    context_window: Some(400000),
+                    max_tokens: Some(32768),
                     recommended: false,
                 },
                 SuggestedModel {
                     id: "gpt-4.1".to_string(),
                     name: "GPT-4.1 (Copilot)".to_string(),
-                    description: Some("OpenAI 最新模型".to_string()),
+                    description: Some("Copilot GPT 系列".to_string()),
                     context_window: Some(1047576),
                     max_tokens: Some(32768),
                     recommended: false,
@@ -723,6 +807,43 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
     // 解析已配置的 Provider
     let mut configured_providers: Vec<ConfiguredProvider> = Vec::new();
 
+    let copilot_model_ids: Vec<String> = available_models
+        .iter()
+        .filter_map(|model| {
+            model
+                .strip_prefix("github-copilot/")
+                .map(|id| id.to_string())
+        })
+        .collect();
+
+    if !copilot_model_ids.is_empty() || has_github_copilot_auth_profile() {
+        let models: Vec<ConfiguredModel> = copilot_model_ids
+            .iter()
+            .map(|id| {
+                let full_id = format!("github-copilot/{}", id);
+                let (name, context_window, max_tokens) = copilot_model_display(id);
+                ConfiguredModel {
+                    full_id: full_id.clone(),
+                    id: id.clone(),
+                    name,
+                    api_type: Some("auto".to_string()),
+                    context_window,
+                    max_tokens,
+                    is_primary: primary_model.as_ref() == Some(&full_id),
+                    is_fallback: fallback_models.iter().any(|fb| fb == &full_id),
+                }
+            })
+            .collect();
+
+        configured_providers.push(ConfiguredProvider {
+            name: GITHUB_COPILOT_PROVIDER_ID.to_string(),
+            base_url: "内置 Copilot Provider".to_string(),
+            api_key_masked: has_github_copilot_auth_profile().then(|| "auth profile".to_string()),
+            has_api_key: has_github_copilot_auth_profile(),
+            models,
+        });
+    }
+
     let providers_value = config.pointer("/models/providers");
     info!(
         "[AI 配置] providers 节点存在: {}",
@@ -733,6 +854,11 @@ pub async fn get_ai_config() -> Result<AIConfigOverview, String> {
         info!("[AI 配置] 找到 {} 个 Provider", providers.len());
 
         for (provider_name, provider_config) in providers {
+            if provider_name == GITHUB_COPILOT_PROVIDER_ID {
+                info!("[AI 配置] 跳过旧版 GitHub Copilot Provider 配置");
+                continue;
+            }
+
             info!("[AI 配置] 解析 Provider: {}", provider_name);
 
             let base_url = provider_config
@@ -857,6 +983,45 @@ pub async fn save_provider(
 
     let mut config = load_openclaw_config()?;
 
+    if provider_name == GITHUB_COPILOT_PROVIDER_ID {
+        if let Some(key) = api_key.as_deref().filter(|key| !key.is_empty()) {
+            save_github_copilot_token(key)?;
+            info!("[保存 Provider] GitHub Copilot Token 已写入 auth profile store");
+        }
+
+        if config.get("agents").is_none() {
+            config["agents"] = json!({});
+        }
+        if config["agents"].get("defaults").is_none() {
+            config["agents"]["defaults"] = json!({});
+        }
+        if config["agents"]["defaults"].get("models").is_none() {
+            config["agents"]["defaults"]["models"] = json!({});
+        }
+
+        for model in &models {
+            let full_id = format!("{}/{}", GITHUB_COPILOT_PROVIDER_ID, model.id);
+            config["agents"]["defaults"]["models"][&full_id] = json!({});
+        }
+
+        if let Some(providers) = config
+            .pointer_mut("/models/providers")
+            .and_then(|v| v.as_object_mut())
+        {
+            providers.remove(GITHUB_COPILOT_PROVIDER_ID);
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+        if config.get("meta").is_none() {
+            config["meta"] = json!({});
+        }
+        config["meta"]["lastTouchedAt"] = json!(now);
+
+        save_openclaw_config(&config)?;
+        info!("[保存 Provider] ✓ GitHub Copilot 内置 Provider 配置保存成功");
+        return Ok("GitHub Copilot 已保存".to_string());
+    }
+
     // 确保路径存在
     if config.get("models").is_none() {
         config["models"] = json!({});
@@ -975,6 +1140,10 @@ pub async fn delete_provider(provider_name: String) -> Result<String, String> {
     info!("[删除 Provider] 删除 Provider: {}", provider_name);
 
     let mut config = load_openclaw_config()?;
+
+    if provider_name == GITHUB_COPILOT_PROVIDER_ID {
+        remove_github_copilot_token()?;
+    }
 
     // 删除 Provider 配置
     if let Some(providers) = config
