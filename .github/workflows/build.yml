@@ -116,6 +116,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version-bump.outputs.new_tag || github.ref }}
 
       # ── 系统依赖 ──────────────────────────────────────────
       - name: Install Linux dependencies
@@ -244,7 +246,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ steps.tag.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true
