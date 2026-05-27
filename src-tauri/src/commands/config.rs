@@ -628,9 +628,9 @@ pub struct DeviceFlowResponse {
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     access_token: Option<String>,
-    token_type: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
+    interval: Option<u32>,
 }
 
 /// GitHub Copilot 认证结果
@@ -655,6 +655,7 @@ pub async fn github_copilot_start_auth() -> Result<DeviceFlowResponse, String> {
     let client = reqwest::Client::new();
     let res = client
         .post("https://github.com/login/device/code")
+        .header(reqwest::header::ACCEPT, "application/json")
         .form(&[("client_id", COPILOT_CLIENT_ID), ("scope", "read:user")])
         .send()
         .await
@@ -666,44 +667,17 @@ pub async fn github_copilot_start_auth() -> Result<DeviceFlowResponse, String> {
         return Err(format!("GitHub 返回错误 ({}): {}", status, body));
     }
 
-    // GitHub 返回的是 form-urlencoded 格式
-    let body = res
-        .text()
+    let device_flow = res
+        .json::<DeviceFlowResponse>()
         .await
-        .map_err(|e| format!("读取响应失败: {}", e))?;
-    let params: HashMap<String, String> =
-        serde_urlencoded::from_str(&body).map_err(|e| format!("解析响应失败: {}", e))?;
+        .map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let device_code = params
-        .get("device_code")
-        .ok_or_else(|| "响应中缺少 device_code".to_string())?
-        .clone();
-    let user_code = params
-        .get("user_code")
-        .ok_or_else(|| "响应中缺少 user_code".to_string())?
-        .clone();
-    let verification_uri = params
-        .get("verification_uri")
-        .ok_or_else(|| "响应中缺少 verification_uri".to_string())?
-        .clone();
-    let expires_in = params
-        .get("expires_in")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(900);
-    let interval = params
-        .get("interval")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5);
+    info!(
+        "[GitHub Copilot] ✓ 设备码已获取, 用户码: {}",
+        device_flow.user_code
+    );
 
-    info!("[GitHub Copilot] ✓ 设备码已获取, 用户码: {}", user_code);
-
-    Ok(DeviceFlowResponse {
-        device_code,
-        user_code,
-        verification_uri,
-        expires_in,
-        interval,
-    })
+    Ok(device_flow)
 }
 
 /// 轮询 GitHub Copilot 认证状态
@@ -716,12 +690,14 @@ pub async fn github_copilot_poll_token(
 
     let client = reqwest::Client::new();
     let max_attempts = 60; // 最多轮询 5 分钟
+    let mut current_interval = interval.max(1);
 
     for attempt in 1..=max_attempts {
-        tokio::time::sleep(tokio::time::Duration::from_secs(interval as u64)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(current_interval as u64)).await;
 
         let res = client
             .post("https://github.com/login/oauth/access_token")
+            .header(reqwest::header::ACCEPT, "application/json")
             .form(&[
                 ("client_id", COPILOT_CLIENT_ID),
                 ("device_code", device_code.as_str()),
@@ -731,13 +707,20 @@ pub async fn github_copilot_poll_token(
             .await
             .map_err(|e| format!("轮询失败: {}", e))?;
 
-        let body = res.text().await.unwrap_or_default();
-        let params: HashMap<String, String> =
-            serde_urlencoded::from_str(&body).map_err(|e| format!("解析轮询响应失败: {}", e))?;
+        let status = res.status();
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(format!("GitHub 返回错误 ({}): {}", status, body));
+        }
+
+        let token_response = res
+            .json::<TokenResponse>()
+            .await
+            .map_err(|e| format!("解析轮询响应失败: {}", e))?;
 
         // 检查是否有错误
-        if let Some(err) = params.get("error") {
-            match err.as_str() {
+        if let Some(err) = token_response.error.as_deref() {
+            match err {
                 "authorization_pending" => {
                     if attempt % 10 == 0 {
                         info!("[GitHub Copilot] 等待用户授权... (第{}次)", attempt);
@@ -745,10 +728,16 @@ pub async fn github_copilot_poll_token(
                     continue; // 用户还没授权，继续轮询
                 }
                 "slow_down" => {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    current_interval = token_response
+                        .interval
+                        .unwrap_or_else(|| current_interval.saturating_add(5));
+                    info!(
+                        "[GitHub Copilot] GitHub 要求降低轮询频率，新的间隔: {}秒",
+                        current_interval
+                    );
                     continue;
                 }
-                "expired_token" => {
+                "expired_token" | "token_expired" => {
                     return Ok(CopilotAuthResult {
                         success: false,
                         access_token: None,
@@ -769,24 +758,29 @@ pub async fn github_copilot_poll_token(
                     });
                 }
                 other => {
+                    let description = token_response
+                        .error_description
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(other);
                     return Ok(CopilotAuthResult {
                         success: false,
                         access_token: None,
                         user_code: None,
                         verification_uri: None,
                         expires_in: None,
-                        error: Some(format!("认证错误: {}", other)),
+                        error: Some(format!("认证错误: {}", description)),
                     });
                 }
             }
         }
 
         // 获取到 Token
-        if let Some(access_token) = params.get("access_token") {
+        if let Some(access_token) = token_response.access_token {
             info!("[GitHub Copilot] ✓ 认证成功!");
             return Ok(CopilotAuthResult {
                 success: true,
-                access_token: Some(access_token.clone()),
+                access_token: Some(access_token),
                 user_code: None,
                 verification_uri: None,
                 expires_in: None,
