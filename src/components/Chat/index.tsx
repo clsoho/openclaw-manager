@@ -257,7 +257,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
                 ...m,
                 content: content || m.content,
                 streaming: !done,
-                ...(done && !error ? { content: content || '(无响应内容)' } : {}),
+                ...(done && !error && !content ? { content: '(无响应内容)' } : {}),
                 ...(error ? { content: `⚠️ ${error}`, streaming: false } : {}),
               }
             : m
@@ -267,11 +267,9 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
       if (done) {
         setSending(false);
         inputRef.current?.focus();
-        if (!error && !gateway.connected) {
+        unlisten();
+        if (!error) {
           setGateway(prev => ({ ...prev, connected: true, running: true }));
-        }
-        if (error) {
-          setGateway(prev => ({ ...prev, connected: false }));
         }
       }
     });
@@ -294,8 +292,7 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
         )
       );
       setSending(false);
-    } finally {
-      setTimeout(() => { unlisten(); }, 500);
+      unlisten();
     }
   };
 
@@ -309,24 +306,30 @@ export function Chat({ initialAgentId }: { initialAgentId?: string } = {}) {
     setStartingGateway(true);
     try {
       await invoke<string>('start_service');
-      setTimeout(async () => {
-        const token = await invoke<string>('get_or_create_gateway_token').catch(() => null);
-        if (token) {
-          setGateway(prev => ({ ...prev, token }));
-        }
-        setStartingGateway(false);
-      }, 3000);
+      const token = await invoke<string>('get_or_create_gateway_token').catch(() => null);
+      if (token) {
+        setGateway(prev => ({ ...prev, token }));
+        const isRunning = await invoke<boolean>('check_gateway_running', { token }).catch(() => false);
+        setGateway(prev => ({ ...prev, connected: isRunning, running: isRunning }));
+      }
+      setStartingGateway(false);
     } catch (e) {
       console.error('启动 Gateway 失败:', e);
       setStartingGateway(false);
     }
   };
 
-  // ============ 启用端点 ============
+  // ============ 启用端点并重启 Gateway ============
   const handleEnableEndpoint = async () => {
     setEnablingEndpoint(true);
     try {
       await invoke<string>('enable_chat_completions');
+      await invoke<string>('restart_service');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      if (gateway.token) {
+        const isRunning = await invoke<boolean>('check_gateway_running', { token: gateway.token }).catch(() => false);
+        setGateway(prev => ({ ...prev, connected: isRunning, running: isRunning }));
+      }
       const epStatus = await invoke<EndpointStatus>('get_chat_endpoint_status');
       setEndpointStatus(epStatus);
     } catch (e) {

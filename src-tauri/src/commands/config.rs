@@ -96,6 +96,11 @@ fn copilot_model_display(model_id: &str) -> (String, Option<u32>, Option<u32>) {
             Some(200000),
             Some(32768),
         ),
+        "claude-sonnet-4.6" => (
+            "Claude Sonnet 4.6 (Copilot)".to_string(),
+            Some(200000),
+            Some(32768),
+        ),
         "claude-sonnet-4.5" => (
             "Claude Sonnet 4.5 (Copilot)".to_string(),
             Some(200000),
@@ -336,6 +341,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
+                    id: "claude-sonnet-4-20250514".to_string(),
+                    name: "Claude Sonnet 4".to_string(),
+                    description: Some("最新旗舰模型，编码和复杂推理最强".to_string()),
+                    context_window: Some(200000),
+                    max_tokens: Some(8192),
+                    recommended: true,
+                },
+                SuggestedModel {
                     id: "claude-opus-4-5-20251101".to_string(),
                     name: "Claude Opus 4.5".to_string(),
                     description: Some("最强大版本，适合复杂任务".to_string()),
@@ -347,6 +360,14 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
                     id: "claude-sonnet-4-5-20250929".to_string(),
                     name: "Claude Sonnet 4.5".to_string(),
                     description: Some("平衡版本，性价比高".to_string()),
+                    context_window: Some(200000),
+                    max_tokens: Some(8192),
+                    recommended: false,
+                },
+                SuggestedModel {
+                    id: "claude-haiku-3-5-20241022".to_string(),
+                    name: "Claude 3.5 Haiku".to_string(),
+                    description: Some("快速轻量版，低延迟".to_string()),
                     context_window: Some(200000),
                     max_tokens: Some(8192),
                     recommended: false,
@@ -364,19 +385,43 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
             auth_type: "api_key".to_string(),
             suggested_models: vec![
                 SuggestedModel {
+                    id: "gpt-4.1".to_string(),
+                    name: "GPT-4.1".to_string(),
+                    description: Some("最新旗舰模型，超长上下文".to_string()),
+                    context_window: Some(1047576),
+                    max_tokens: Some(32768),
+                    recommended: true,
+                },
+                SuggestedModel {
+                    id: "gpt-4.1-mini".to_string(),
+                    name: "GPT-4.1 Mini".to_string(),
+                    description: Some("快速经济版".to_string()),
+                    context_window: Some(1047576),
+                    max_tokens: Some(32768),
+                    recommended: false,
+                },
+                SuggestedModel {
+                    id: "gpt-4.1-nano".to_string(),
+                    name: "GPT-4.1 Nano".to_string(),
+                    description: Some("极速低延迟版".to_string()),
+                    context_window: Some(1047576),
+                    max_tokens: Some(16384),
+                    recommended: false,
+                },
+                SuggestedModel {
                     id: "gpt-4o".to_string(),
                     name: "GPT-4o".to_string(),
-                    description: Some("最新多模态模型".to_string()),
+                    description: Some("多模态模型".to_string()),
                     context_window: Some(128000),
-                    max_tokens: Some(4096),
-                    recommended: true,
+                    max_tokens: Some(16384),
+                    recommended: false,
                 },
                 SuggestedModel {
                     id: "gpt-4o-mini".to_string(),
                     name: "GPT-4o Mini".to_string(),
                     description: Some("快速经济版".to_string()),
                     context_window: Some(128000),
-                    max_tokens: Some(4096),
+                    max_tokens: Some(16384),
                     recommended: false,
                 },
             ],
@@ -576,6 +621,16 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
                     recommended: true,
                 },
                 SuggestedModel {
+                    id: "claude-sonnet-4.6".to_string(),
+                    name: "Claude Sonnet 4.6 (Copilot)".to_string(),
+                    description: Some(
+                        "最新 Sonnet 模型，编码能力最强".to_string(),
+                    ),
+                    context_window: Some(200000),
+                    max_tokens: Some(32768),
+                    recommended: true,
+                },
+                SuggestedModel {
                     id: "claude-sonnet-4.5".to_string(),
                     name: "Claude Sonnet 4.5 (Copilot)".to_string(),
                     description: Some(
@@ -583,7 +638,7 @@ pub async fn get_official_providers() -> Result<Vec<OfficialProvider>, String> {
                     ),
                     context_window: Some(200000),
                     max_tokens: Some(16384),
-                    recommended: true,
+                    recommended: false,
                 },
                 SuggestedModel {
                     id: "gpt-5.5".to_string(),
@@ -1050,7 +1105,17 @@ pub async fn save_provider(
         ensure_agents_defaults_models(&mut config);
         for model in &models {
             let full_id = format!("{}/{}", GITHUB_COPILOT_PROVIDER_ID, model.id);
-            config["agents"]["defaults"]["models"][&full_id] = json!({});
+            let mut model_entry = json!({});
+            if let Some(api) = &model.api {
+                model_entry["api"] = json!(api);
+            }
+            if let Some(cw) = model.context_window {
+                model_entry["contextWindow"] = json!(cw);
+            }
+            if let Some(mt) = model.max_tokens {
+                model_entry["maxTokens"] = json!(mt);
+            }
+            config["agents"]["defaults"]["models"][&full_id] = model_entry;
         }
 
         if let Some(providers) = config
@@ -2963,7 +3028,21 @@ pub async fn get_chat_endpoint_status() -> Result<ChatEndpointStatus, String> {
     let enabled = config
         .pointer("/gateway/http/endpoints/chatCompletions/enabled")
         .and_then(|v| v.as_bool())
+        .unwrap_or(
+            config
+                .pointer("/gateway/http/endpoints/chatCompletions/path")
+                .and_then(|v| v.as_str())
+                .map(|p| !p.is_empty())
+                .unwrap_or(false),
+        );
+
+    // Also check legacy location
+    let legacy_enabled = config
+        .pointer("/gateway/endpoints/chatCompletions/enabled")
+        .and_then(|v| v.as_bool())
         .unwrap_or(false);
+
+    let enabled = enabled || legacy_enabled;
 
     let has_token = config
         .pointer("/gateway/auth/token")
@@ -2971,9 +3050,19 @@ pub async fn get_chat_endpoint_status() -> Result<ChatEndpointStatus, String> {
         .map(|s| !s.is_empty())
         .unwrap_or(false);
 
-    let gateway_running = crate::utils::shell::run_openclaw(&["gateway", "status"])
-        .map(|output| output.to_lowercase().contains("running"))
-        .unwrap_or(false);
+    // 通过 HTTP 探测 Gateway 是否运行（比解析 CLI 输出更可靠）
+    let gateway_running = {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .ok();
+        if let Some(c) = client {
+            let url = format!("http://127.0.0.1:{}/", shell::get_gateway_port());
+            c.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false)
+        } else {
+            false
+        }
+    };
 
     info!(
         "[聊天端点] enabled={}, has_token={}, running={}",
@@ -3003,17 +3092,22 @@ pub async fn enable_chat_completions() -> Result<String, String> {
     if config["gateway"]["http"].get("endpoints").is_none() {
         config["gateway"]["http"]["endpoints"] = json!({});
     }
-    if config["gateway"]["http"]["endpoints"]
-        .get("chatCompletions")
-        .is_none()
-    {
-        config["gateway"]["http"]["endpoints"]["chatCompletions"] = json!({});
+
+    config["gateway"]["http"]["endpoints"]["chatCompletions"] = json!({
+        "enabled": true,
+        "path": "/v1/chat/completions"
+    });
+
+    // 确保 gateway.http 有正确的绑定地址
+    if config["gateway"]["http"].get("host").is_none() {
+        config["gateway"]["http"]["host"] = json!("127.0.0.1");
+    }
+    if config["gateway"]["http"].get("port").is_none() {
+        config["gateway"]["http"]["port"] = json!(shell::get_gateway_port());
     }
 
-    config["gateway"]["http"]["endpoints"]["chatCompletions"]["enabled"] = json!(true);
-
     save_openclaw_config(&config)?;
-    info!("[聊天端点] ✓ chat completions 端点已启用");
+    info!("[聊天端点] ✓ chat completions 端点已启用 (path: /v1/chat/completions)");
     Ok("chat completions 端点已启用，重启 Gateway 后生效".to_string())
 }
 
@@ -3247,13 +3341,13 @@ pub async fn send_chat_stream(
     });
 
     let url = format!(
-        "http://127.0.0.1:{}/v1/chat/completions?token={}",
-        shell::get_gateway_port(),
-        token
+        "http://127.0.0.1:{}/v1/chat/completions",
+        shell::get_gateway_port()
     );
     let resp = client
         .post(&url)
         .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", token))
         .json(&body)
         .send()
         .await
